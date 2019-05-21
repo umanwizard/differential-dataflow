@@ -15,7 +15,7 @@ use differential_dataflow::logging::DifferentialEvent;
 
 type Dist = u32;
 type Node = u32;
-type Edge = (Node, (Node, Dist));
+type Edge = (Node, (Node, (Dist, Dist)));
 
 fn main() {
 
@@ -30,19 +30,19 @@ fn main() {
     let rounds: u32 = args.next().unwrap().parse().unwrap();
     let inspect: bool = args.next().unwrap() == "inspect";
 
-    // define a new computational scope, in which to run BFS
+    // define a new computational scope, in which to run sswp
     timely::execute_from_args(std::env::args(), move |worker| {
 
         let timer = ::std::time::Instant::now();
 
-        // define BFS dataflow; return handles to roots and edges inputs
+        // define sswp dataflow; return handles to roots and edges inputs
         let mut probe = Handle::new();
         let (mut roots, mut graph) = worker.dataflow(|scope| {
 
             let (root_input, roots) = scope.new_collection();
             let (edge_input, graph) = scope.new_collection();
 
-            let mut result = sssp(&graph, &roots);
+            let mut result = spwp(&graph, &roots);
 
             if !inspect {
                 result = result.filter(|_| false);
@@ -63,11 +63,11 @@ fn main() {
         roots.insert(0);
         roots.close();
 
-        println!("performing BFS on {} nodes, {} edges:", nodes, edges);
+        println!("performing sswp on {} nodes, {} edges:", nodes, edges);
 
         if worker.index() == 0 {
             for _ in 0 .. edges {
-                graph.insert((rng1.gen_range(0, nodes), (rng1.gen_range(0, nodes), rng1.gen_range(min_w, max_w))));
+                graph.insert((rng1.gen_range(0, nodes), (rng1.gen_range(0, nodes), (rng1.gen_range(min_w, max_w), rng1.gen_range(min_w, max_w)))));
             }
         }
 
@@ -84,8 +84,8 @@ fn main() {
             for round in 0 .. rounds {
                 for element in 0 .. batch {
                     if worker.index() == 0 {
-                        graph.insert((rng1.gen_range(0, nodes), (rng1.gen_range(0, nodes), rng1.gen_range(min_w, max_w))));
-                        graph.remove((rng2.gen_range(0, nodes), (rng2.gen_range(0, nodes), rng2.gen_range(min_w, max_w))));
+                        graph.insert((rng1.gen_range(0, nodes), (rng1.gen_range(0, nodes), (rng1.gen_range(min_w, max_w), rng1.gen_range(min_w, max_w)))));
+                        graph.remove((rng2.gen_range(0, nodes), (rng2.gen_range(0, nodes), (rng2.gen_range(min_w, max_w), rng2.gen_range(min_w, max_w)))));
                     }
                     graph.advance_to(2 + round * batch + element);
                 }
@@ -109,11 +109,11 @@ fn main() {
 }
 
 // returns pairs (n, s) indicating node n can be reached from a root in s steps.
-fn sssp<G: Scope>(edges: &Collection<G, Edge>, roots: &Collection<G, Node>) -> Collection<G, (Node, u32)>
+fn spwp<G: Scope>(edges: &Collection<G, Edge>, roots: &Collection<G, Node>) -> Collection<G, (Node, (u32, u32))>
 where G::Timestamp: Lattice+Ord {
 
     // initialize roots as reaching themselves at distance 0
-    let nodes = roots.map(|x| (x, 0));
+    let nodes = roots.map(|x| (x, (0, 0)));
 
     // repeatedly update minimal distances each node can be reached from each root
     nodes.iterate(|inner| {
@@ -123,20 +123,31 @@ where G::Timestamp: Lattice+Ord {
         use differential_dataflow::AsCollection;
 
         let edges = edges.enter(&inner.scope());
-
         let nodes = nodes.enter(&inner.scope());
 
-        inner.join_map(&edges, |_k,l,(d,w)| (d.clone(), l+w))
-             .concat(&nodes)
-             .inner
-             .map_in_place(|((d,w),t,r)|
-                t.inner = std::cmp::max(t.inner, *w as u64)
-             )
-             .delay(|(_,t,_),_| t.clone())
-             .as_collection()
-             .reduce(|_, s, t| {
-                t.push((*s[0].0, 1));
-                println!("{:?} -> {:?}", s, t);
-             })
+        // inner.join_map(&edges, |_k,(l1,w1),(d,l2,w2)| (*d, (*l1 + *l2, ::std::cmp::max(*w1, *w2))))
+        inner
+            .join(&edges)
+            .map(|(_k,((l1,w1),(d,(l2,w2))))| (d, (l1 + l2, std::cmp::max(w1, w2))))
+            .concat(&nodes)
+            .inner
+            .map_in_place(|((_,(l,w)),t,_)|
+                // t.inner = ::std::cmp::max(t.inner, *l as u64)
+                t.inner = ::std::cmp::max(t.inner, 1024 * *w as u64)
+            )
+            .delay(|(_,t,_),_| t.clone())
+            .as_collection()
+            .reduce(|_, s, t: &mut Vec<((Dist, Dist), isize)>| {
+                // things are sorted by (l, w).
+                // t.push((*s[0].0, 1));
+                for index in 0 .. s.len() {
+                    let last = t.last().map(|x| (x.0).1).unwrap_or(u32::max_value());
+                    if last > (s[index].0).1 {
+                        t.push((*s[index].0, 1));
+                    }
+                }
+
+                // println!("{:?} -> {:?}", s, t);
+            })
      })
 }

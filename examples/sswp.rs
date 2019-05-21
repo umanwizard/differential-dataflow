@@ -33,22 +33,6 @@ fn main() {
     // define a new computational scope, in which to run sswp
     timely::execute_from_args(std::env::args(), move |worker| {
 
-        if let Ok(addr) = ::std::env::var("DIFFERENTIAL_LOG_ADDR") {
-
-            eprintln!("enabled DIFFERENTIAL logging to {}", addr);
-
-            if let Ok(stream) = ::std::net::TcpStream::connect(&addr) {
-                let writer = ::timely::dataflow::operators::capture::EventWriter::new(stream);
-                let mut logger = ::timely::logging::BatchLogger::new(writer);
-                worker.log_register().insert::<DifferentialEvent,_>("differential/arrange", move |time, data|
-                    logger.publish_batch(time, data)
-                );
-            }
-            else {
-                panic!("Could not connect to differential log address: {:?}", addr);
-            }
-        }
-
         let timer = ::std::time::Instant::now();
 
         // define sswp dataflow; return handles to roots and edges inputs
@@ -107,13 +91,13 @@ fn main() {
                 }
                 graph.flush();
 
-                let timer2 = ::std::time::Instant::now();
+                // let timer2 = ::std::time::Instant::now();
                 worker.step_while(|| probe.less_than(&graph.time()));
 
-                if worker.index() == 0 {
-                    let elapsed = timer2.elapsed();
-                    println!("{:?}\tround {:?}:\t{}", timer.elapsed(), round, elapsed.as_secs() * 1000000000 + (elapsed.subsec_nanos() as u64));
-                }
+                // if worker.index() == 0 {
+                //     let elapsed = timer2.elapsed();
+                //     println!("{:?}\tround {:?}:\t{}", timer.elapsed(), round, elapsed.as_secs() * 1000000000 + (elapsed.subsec_nanos() as u64));
+                // }
             }
         }
         else {
@@ -139,18 +123,19 @@ where G::Timestamp: Lattice+Ord {
         use differential_dataflow::AsCollection;
 
         let edges = edges.enter(&inner.scope());
-        // let edges = edges.enter_at(&inner.scope(), |x| 1024 * (x.1).1.next_power_of_two() as u64);
         let nodes = nodes.enter(&inner.scope());
 
         inner.join_map(&edges, |_k,l,(d,w)| (*d, ::std::cmp::max(*l, *w)))
              .concat(&nodes)
-             // .inner
-             // .map(|((d,w),mut t,r)| {
-             //    t.inner = ::std::cmp::max(t.inner, 1024 * w as u64);
-             //    ((d,w),t,r)
-             // })
-             // .delay(|(_,t,_),_| t.clone())
-             // .as_collection()
-             .reduce(|_, s, t| t.push((*s[0].0, 1)))
+             .inner
+             .map_in_place(|((_,w),t,_)|
+                t.inner = ::std::cmp::max(t.inner, 1024 * *w as u64)
+             )
+             .delay(|(_,t,_),_| t.clone())
+             .as_collection()
+             .reduce(|_, s, t| {
+                t.push((*s[0].0, 1));
+                println!("{:?} -> {:?}", s, t);
+             })
      })
 }
