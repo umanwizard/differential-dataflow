@@ -7,8 +7,8 @@ use timely::dataflow::Scope;
 use differential_dataflow::operators::JoinCore;
 
 use differential_dataflow::{Collection, ExchangeData};
-use plan::{Plan, Render};
-use {TraceManager, Time, Diff, Datum};
+use plan::{Plan, Render, Stash};
+use crate::{Diff, Datum};
 
 /// A plan stage joining two source relations on the specified
 /// symbols. Throws if any of the join symbols isn't bound by both
@@ -27,26 +27,23 @@ impl<V: ExchangeData+Hash+Datum> Render for Join<V> {
 
     type Value = V;
 
-    fn render<S: Scope<Timestamp = Time>>(
+    fn render<S: Scope>(
         &self,
         scope: &mut S,
-        collections: &mut std::collections::HashMap<Plan<Self::Value>, Collection<S, Vec<Self::Value>, Diff>>,
-        arrangements: &mut TraceManager<Self::Value>,
+        stash: &mut Stash<S, Self::Value>,
     ) -> Collection<S, Vec<Self::Value>, Diff>
+    where
+        S::Timestamp: differential_dataflow::lattice::Lattice,
     {
         use differential_dataflow::operators::arrange::ArrangeByKey;
 
         // acquire arrangements for each input.
         let keys1 = self.keys.iter().map(|key| key.0).collect::<Vec<_>>();
-        let mut trace1 =
-        if let Some(arrangement) = arrangements.get_keyed(&self.plan1, &keys1[..]) {
-            arrangement
-        }
-        else {
+        if stash.get_local(&self.plan1, Some(&keys1[..])).is_none() {
             let keys = keys1.clone();
             let arrangement =
             self.plan1
-                .render(scope, collections, arrangements)
+                .render(scope, stash)
                 .map(move |tuple|
                     (
                         // TODO: Re-use `tuple` for values.
@@ -61,21 +58,16 @@ impl<V: ExchangeData+Hash+Datum> Render for Join<V> {
                 )
                 .arrange_by_key();
 
-            arrangements.set_keyed(&self.plan1, &keys1[..], &arrangement.trace);
-            arrangement.trace
+            stash.set_local((*self.plan1).clone(), Some(&keys1[..]), arrangement);
         };
 
         // extract relevant fields for each index.
         let keys2 = self.keys.iter().map(|key| key.1).collect::<Vec<_>>();
-        let mut trace2 =
-        if let Some(arrangement) = arrangements.get_keyed(&self.plan2, &keys2[..]) {
-            arrangement
-        }
-        else {
+        if stash.get_local(&self.plan2, Some(&keys2[..])).is_none() {
             let keys = keys2.clone();
             let arrangement =
             self.plan2
-                .render(scope, collections, arrangements)
+                .render(scope, stash)
                 .map(move |tuple|
                     (
                         // TODO: Re-use `tuple` for values.
@@ -90,12 +82,11 @@ impl<V: ExchangeData+Hash+Datum> Render for Join<V> {
                 )
                 .arrange_by_key();
 
-            arrangements.set_keyed(&self.plan2, &keys2[..], &arrangement.trace);
-            arrangement.trace
+            stash.set_local((*self.plan2).clone(), Some(&keys2[..]), arrangement);
         };
 
-        let arrange1 = trace1.import(scope);
-        let arrange2 = trace2.import(scope);
+        let arrange1 = stash.get_local(&self.plan1, Some(&keys1[..])).expect("We just installed this");
+        let arrange2 = stash.get_local(&self.plan2, Some(&keys2[..])).expect("We just installed this");
 
         arrange1
             .join_core(&arrange2, |keys, vals1, vals2| {

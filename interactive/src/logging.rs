@@ -27,16 +27,16 @@ pub fn publish_timely_logging<V, A, I>(
     events: I
 )
 where
-    V: ExchangeData+Hash+LoggingValue+Datum,
+    V: ExchangeData+Hash+LoggingValue+Datum+From<usize>,
     A: Allocate,
     I : IntoIterator,
     <I as IntoIterator>::Item: EventIterator<Duration, (Duration, usize, TimelyEvent)>+'static
 {
-    let (operates, channels, schedule, messages, shutdown, park, text) =
+    let (operates, channels, schedule, elapsed, histogram, messages, shutdown, park, text) =
     worker.dataflow(move |scope| {
 
-        // use timely::dataflow::operators::Map;
-        // use timely::dataflow::operators::Operator;
+        use timely::dataflow::operators::Map;
+        use timely::dataflow::operators::Operator;
         use timely::dataflow::operators::capture::Replay;
         use timely::dataflow::operators::generic::builder_rc::OperatorBuilder;
 
@@ -89,25 +89,25 @@ where
 
                         match datum {
                             TimelyEvent::Operates(_) => {
-                                operates_session.give((V::vector_from(datum), time, 1));
+                                operates_session.give(((V::vector_from(datum), vec![]), time, 1));
                             },
                             TimelyEvent::Channels(_) => {
-                                channels_session.give((V::vector_from(datum), time, 1));
+                                channels_session.give(((V::vector_from(datum), vec![]), time, 1));
                             },
                             TimelyEvent::Schedule(_) => {
-                                schedule_session.give((V::vector_from(datum), time, 1));
+                                schedule_session.give(((V::vector_from(datum), vec![]), time, 1));
                             },
                             TimelyEvent::Messages(_) => {
-                                messages_session.give((V::vector_from(datum), time, 1));
+                                messages_session.give(((V::vector_from(datum), vec![]), time, 1));
                             },
                             TimelyEvent::Shutdown(_) => {
-                                shutdown_session.give((V::vector_from(datum), time, 1));
+                                shutdown_session.give(((V::vector_from(datum), vec![]), time, 1));
                             },
                             TimelyEvent::Park(_) => {
-                                park_session.give((V::vector_from(datum), time, 1));
+                                park_session.give(((V::vector_from(datum), vec![]), time, 1));
                             }
                             TimelyEvent::Text(_) => {
-                                text_session.give((V::vector_from(datum), time, 1));
+                                text_session.give(((V::vector_from(datum), vec![]), time, 1));
                             }
                             _ => { },
                         }
@@ -116,90 +116,94 @@ where
             }
         });
 
-        // // Pair up start and stop events, to capture scheduling durations.
-        // let duration =
-        //     input_stream
-        //         .flat_map(move |(ts, worker, x)|
-        //             if let TimelyEvent::Schedule(event) = x {
-        //                 Some((ts, worker, event))
-        //             } else { None }
-        //         )
-        //         .unary(timely::dataflow::channels::pact::Pipeline, "Schedules", |_,_| {
+        // Pair up start and stop events, to capture scheduling durations.
+        let duration =
+            input_stream
+                .flat_map(move |(ts, worker, x)|
+                    if let TimelyEvent::Schedule(event) = x {
+                        Some((ts, worker, event))
+                    } else { None }
+                )
+                .unary(timely::dataflow::channels::pact::Pipeline, "Schedules", |_,_| {
 
-        //             let mut map = std::collections::HashMap::new();
-        //             let mut vec = Vec::new();
+                    let mut map = std::collections::HashMap::new();
+                    let mut vec = Vec::new();
 
-        //             move |input, output| {
+                    move |input, output| {
 
-        //                 input.for_each(|time, data| {
-        //                     data.swap(&mut vec);
-        //                     let mut session = output.session(&time);
-        //                     for (ts, worker, event) in vec.drain(..) {
-        //                         let key = (worker, event.id);
-        //                         match event.start_stop {
-        //                             timely::logging::StartStop::Start => {
-        //                                 assert!(!map.contains_key(&key));
-        //                                 map.insert(key, ts);
-        //                             },
-        //                             timely::logging::StartStop::Stop => {
-        //                                 assert!(map.contains_key(&key));
-        //                                 let start = map.remove(&key).unwrap();
-        //                                 let elapsed = ts - start;
-        //                                 let elapsed_ns = (elapsed.as_secs() as isize) * 1_000_000_000 + (elapsed.subsec_nanos() as isize);
-        //                                 session.give((key.1, ts, elapsed_ns));
-        //                             }
-        //                         }
-        //                     }
-        //                 });
-        //             }
-        //         });
+                        input.for_each(|time, data| {
+                            data.swap(&mut vec);
+                            let mut session = output.session(&time);
+                            for (ts, worker, event) in vec.drain(..) {
+                                let key = (worker, event.id);
+                                match event.start_stop {
+                                    timely::logging::StartStop::Start => {
+                                        assert!(!map.contains_key(&key));
+                                        map.insert(key, ts);
+                                    },
+                                    timely::logging::StartStop::Stop => {
+                                        assert!(map.contains_key(&key));
+                                        let start = map.remove(&key).unwrap();
+                                        let elapsed = ts - start;
+                                        let elapsed_ns = (elapsed.as_secs() as isize) * 1_000_000_000 + (elapsed.subsec_nanos() as isize);
+                                        session.give((key.1, ts, elapsed_ns));
+                                    }
+                                }
+                            }
+                        });
+                    }
+                });
 
         use differential_dataflow::collection::AsCollection;
-        use differential_dataflow::operators::arrange::ArrangeBySelf;
-        let operates = operates.as_collection().arrange_by_self().trace;
-        let channels = channels.as_collection().arrange_by_self().trace;
-        let schedule = schedule.as_collection().arrange_by_self().trace;
-        let messages = messages.as_collection().arrange_by_self().trace;
-        let shutdown = shutdown.as_collection().arrange_by_self().trace;
-        let park = park.as_collection().arrange_by_self().trace;
-        let text = text.as_collection().arrange_by_self().trace;
+        use differential_dataflow::operators::arrange::ArrangeByKey;
+        let operates = operates.as_collection().arrange_by_key().trace;
+        let channels = channels.as_collection().arrange_by_key().trace;
+        let schedule = schedule.as_collection().arrange_by_key().trace;
+        let messages = messages.as_collection().arrange_by_key().trace;
+        let shutdown = shutdown.as_collection().arrange_by_key().trace;
+        let park = park.as_collection().arrange_by_key().trace;
+        let text = text.as_collection().arrange_by_key().trace;
 
-        // let elapsed =
-        // duration
-        //     .map(|(k,t,r)| (vec![Value::Usize(k)], t, r))
-        //     .map(move |(k,time,r)| {
-        //         // Round time up to next multiple of `granularity_ns`.
-        //         let time_ns = (((time.as_nanos() as u64) / granularity_ns) + 1) * granularity_ns;
-        //         let time = Duration::from_nanos(time_ns);
-        //         (k,time,r)
-        //     })
-        //     .as_collection()
-        //     .arrange_by_self()
-        //     .trace;
+        let elapsed =
+        duration
+            // .map(|(k,t,r)| (vec![k.into()], t, r))
+            .map(move |(k,time,r): (usize,_,isize)| {
+                // Round time up to next multiple of `granularity_ns`.
+                let time_ns = (((time.as_nanos() as u64) / granularity_ns) + 1) * granularity_ns;
+                let time = Duration::from_nanos(time_ns);
+                let key: V = k.into();
+                ((vec![key], vec![]),time,r)
+            })
+            .as_collection()
+            .arrange_by_key()
+            .trace;
 
-        // let histogram =
-        // duration
-        //     .map(|(k,t,r)| (vec![Value::Usize(k), Value::Usize((r as usize).next_power_of_two())], t, 1))
-        //     .map(move |(k,time,r)| {
-        //         // Round time up to next multiple of `granularity_ns`.
-        //         let time_ns = (((time.as_nanos() as u64) / granularity_ns) + 1) * granularity_ns;
-        //         let time = Duration::from_nanos(time_ns);
-        //         (k,time,r)
-        //     })
-        //     .as_collection()
-        //     .arrange_by_self()
-        //     .trace;
+        let histogram =
+        duration
+            .map(|(k,t,r)| (vec![k.into(), (r as usize).next_power_of_two().into()], t, 1))
+            .map(move |(k,time,r)| {
+                // Round time up to next multiple of `granularity_ns`.
+                let time_ns = (((time.as_nanos() as u64) / granularity_ns) + 1) * granularity_ns;
+                let time = Duration::from_nanos(time_ns);
+                let key: Vec<V> = k.into();
+                ((key, vec![]),time,r)
+            })
+            .as_collection()
+            .arrange_by_key()
+            .trace;
 
-        (operates, channels, schedule, messages, shutdown, park, text)
+        (operates, channels, schedule, elapsed, histogram, messages, shutdown, park, text)
     });
 
-    manager.traces.set_unkeyed(&Plan::Source(format!("logs/{}/timely/operates", name)), &operates);
-    manager.traces.set_unkeyed(&Plan::Source(format!("logs/{}/timely/channels", name)), &channels);
-    manager.traces.set_unkeyed(&Plan::Source(format!("logs/{}/timely/schedule", name)), &schedule);
-    manager.traces.set_unkeyed(&Plan::Source(format!("logs/{}/timely/messages", name)), &messages);
-    manager.traces.set_unkeyed(&Plan::Source(format!("logs/{}/timely/shutdown", name)), &shutdown);
-    manager.traces.set_unkeyed(&Plan::Source(format!("logs/{}/timely/park", name)), &park);
-    manager.traces.set_unkeyed(&Plan::Source(format!("logs/{}/timely/text", name)), &text);
+    manager.traces.set(&Plan::source(&format!("logs/{}/timely/operates", name), 3), None, &operates);
+    manager.traces.set(&Plan::source(&format!("logs/{}/timely/channels", name), 6), None, &channels);
+    manager.traces.set(&Plan::source(&format!("logs/{}/timely/schedule", name), 2), None, &schedule);
+    manager.traces.set(&Plan::source(&format!("logs/{}/timely/schedule/elapsed", name), 1), None, &elapsed);
+    manager.traces.set(&Plan::source(&format!("logs/{}/timely/schedule/histogram", name), 2), None, &histogram);
+    manager.traces.set(&Plan::source(&format!("logs/{}/timely/messages", name), 6), None, &messages);
+    manager.traces.set(&Plan::source(&format!("logs/{}/timely/shutdown", name), 1), None, &shutdown);
+    manager.traces.set(&Plan::source(&format!("logs/{}/timely/park", name), 2), None, &park);
+    manager.traces.set(&Plan::source(&format!("logs/{}/timely/text", name), 1), None, &text);
 
     // manager.traces.set_unkeyed(&Plan::Source(format!("logs/{}/timely/schedule/elapsed", name)), &elapsed);
     // manager.traces.set_unkeyed(&Plan::Source(format!("logs/{}/timely/schedule/histogram", name)), &histogram);
@@ -258,10 +262,10 @@ where
 
                         match datum {
                             DifferentialEvent::Batch(_) => {
-                                batch_session.give((V::vector_from(datum), time, 1));
+                                batch_session.give(((V::vector_from(datum), vec![]), time, 1));
                             },
                             DifferentialEvent::Merge(_) => {
-                                merge_session.give((V::vector_from(datum), time, 1));
+                                merge_session.give(((V::vector_from(datum), vec![]), time, 1));
                             },
                             _ => { },
                         }
@@ -271,13 +275,13 @@ where
         });
 
         use differential_dataflow::collection::AsCollection;
-        use differential_dataflow::operators::arrange::ArrangeBySelf;
-        let batch = batch.as_collection().arrange_by_self().trace;
-        let merge = merge.as_collection().arrange_by_self().trace;
+        use differential_dataflow::operators::arrange::ArrangeByKey;
+        let batch = batch.as_collection().arrange_by_key().trace;
+        let merge = merge.as_collection().arrange_by_key().trace;
 
         (merge,batch)
     });
 
-    manager.traces.set_unkeyed(&Plan::Source(format!("logs/{}/differential/arrange/batch", name)), &batch);
-    manager.traces.set_unkeyed(&Plan::Source(format!("logs/{}/differential/arrange/merge", name)), &merge);
+    manager.traces.set(&Plan::source(&format!("logs/{}/differential/arrange/batch", name), 2), None, &batch);
+    manager.traces.set(&Plan::source(&format!("logs/{}/differential/arrange/merge", name), 6), None, &merge);
 }

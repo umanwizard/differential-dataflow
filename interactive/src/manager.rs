@@ -81,7 +81,7 @@ impl<V: ExchangeData+Datum> Manager<V>
     /// Clear the managed inputs and traces.
     pub fn shutdown<A: Allocate>(&mut self, worker: &mut Worker<A>) {
         self.inputs.sessions.clear();
-        self.traces.inputs.clear();
+        // self.traces.inputs.clear();
         self.traces.arrangements.clear();
 
         // Deregister loggers, so that the logging dataflows can shut down.
@@ -98,11 +98,12 @@ impl<V: ExchangeData+Datum> Manager<V>
     pub fn insert_input(
         &mut self,
         name: String,
+        arity: usize,
         input: InputSession<Time, Vec<V>, Diff>,
-        trace: KeysOnlyHandle<V>)
+        trace: KeysValsHandle<V>)
     {
         self.inputs.sessions.insert(name.clone(), input);
-        self.traces.set_unkeyed(&Plan::Source(name), &trace);
+        self.traces.set(&Plan::source(&name, arity), None, &trace);
     }
 
     /// Advances inputs and traces to `time`.
@@ -159,12 +160,12 @@ impl<V: ExchangeData> InputManager<V> {
 /// to various arranged forms of that collection.
 pub struct TraceManager<V: ExchangeData+Datum> {
 
-    /// Arrangements where the record itself is they key.
-    ///
-    /// This contains both input collections, which are here cached so that
-    /// they can be re-used, intermediate collections that are cached, and
-    /// any collections that are explicitly published.
-    inputs: HashMap<Plan<V>, KeysOnlyHandle<V>>,
+    // /// Arrangements where the record itself is they key.
+    // ///
+    // /// This contains both input collections, which are here cached so that
+    // /// they can be re-used, intermediate collections that are cached, and
+    // /// any collections that are explicitly published.
+    // inputs: HashMap<Plan<V>, KeysOnlyHandle<V>>,
 
     /// Arrangements of collections by key.
     arrangements: HashMap<Plan<V>, HashMap<Vec<usize>, KeysValsHandle<V>>>,
@@ -176,7 +177,7 @@ impl<V: ExchangeData+Hash+Datum> TraceManager<V> {
     /// Creates a new empty trace manager.
     pub fn new() -> Self {
         Self {
-            inputs: HashMap::new(),
+            // inputs: HashMap::new(),
             arrangements: HashMap::new()
         }
     }
@@ -186,10 +187,10 @@ impl<V: ExchangeData+Hash+Datum> TraceManager<V> {
         use differential_dataflow::trace::TraceReader;
 
         let frontier = &[time.clone()];
-        for trace in self.inputs.values_mut() {
-            trace.advance_by(frontier);
-            trace.distinguish_since(frontier);
-        }
+        // for trace in self.inputs.values_mut() {
+        //     trace.advance_by(frontier);
+        //     trace.distinguish_since(frontier);
+        // }
         for map in self.arrangements.values_mut() {
             for trace in map.values_mut() {
                 trace.advance_by(frontier);
@@ -198,32 +199,48 @@ impl<V: ExchangeData+Hash+Datum> TraceManager<V> {
         }
     }
 
-    /// Recover an arrangement by plan and keys, if it is cached.
-    pub fn get_unkeyed(&self, plan: &Plan<V>) -> Option<KeysOnlyHandle<V>> {
-        self.inputs
-            .get(plan)
-            .map(|x| x.clone())
-    }
+    // /// Recover an arrangement by plan and keys, if it is cached.
+    // pub fn get_unkeyed(&self, plan: &Plan<V>) -> Option<KeysOnlyHandle<V>> {
+    //     self.inputs
+    //         .get(plan)
+    //         .map(|x| x.clone())
+    // }
 
-    /// Installs an unkeyed arrangement for a specified plan.
-    pub fn set_unkeyed(&mut self, plan: &Plan<V>, handle: &KeysOnlyHandle<V>) {
-        self.inputs
-            .insert(plan.clone(), handle.clone());
-    }
+    // /// Installs an unkeyed arrangement for a specified plan.
+    // pub fn set_unkeyed(&mut self, plan: &Plan<V>, handle: &KeysOnlyHandle<V>) {
+    //     self.inputs
+    //         .insert(plan.clone(), handle.clone());
+    // }
 
     /// Recover an arrangement by plan and keys, if it is cached.
-    pub fn get_keyed(&self, plan: &Plan<V>, keys: &[usize]) -> Option<KeysValsHandle<V>> {
-        self.arrangements
-            .get(plan)
-            .and_then(|map| map.get(keys).map(|x| x.clone()))
+    pub fn get(&self, plan: &Plan<V>, keys: Option<&[usize]>) -> Option<KeysValsHandle<V>> {
+        if let Some(keys) = keys {
+            self.arrangements
+                .get(plan)
+                .and_then(|map| map.get(keys).map(|x| x.clone()))
+        }
+        else {
+            let keys = (0 .. plan.arity).collect::<Vec<_>>();
+            self.arrangements
+                .get(plan)
+                .and_then(|map| map.get(&keys).map(|x| x.clone()))
+        }
     }
 
     /// Installs a keyed arrangement for a specified plan and sequence of keys.
-    pub fn set_keyed(&mut self, plan: &Plan<V>, keys: &[usize], handle: &KeysValsHandle<V>) {
-        self.arrangements
-            .entry(plan.clone())
-            .or_insert(HashMap::new())
-            .insert(keys.to_vec(), handle.clone());
+    pub fn set(&mut self, plan: &Plan<V>, keys: Option<&[usize]>, handle: &KeysValsHandle<V>) {
+        if let Some(keys) = keys {
+            self.arrangements
+                .entry(plan.clone())
+                .or_insert(HashMap::new())
+                .insert(keys.to_vec(), handle.clone());
+        }
+        else {
+            let keys = (0 .. plan.arity).collect::<Vec<_>>();
+            self.arrangements
+                .entry(plan.clone())
+                .or_insert(HashMap::new())
+                .insert(keys.to_vec(), handle.clone());
+        }
     }
-
 }

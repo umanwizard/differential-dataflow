@@ -9,28 +9,28 @@ fn main() {
     let socket = std::net::TcpStream::connect("127.0.0.1:8000".to_string()).expect("failed to connect");
     let mut session = Session::new(socket);
 
-    session.issue(Command::CreateInput("XYZ".to_string(), Vec::new()));
-    session.issue(Command::CreateInput("XYGoal".to_string(), Vec::new()));
-    session.issue(Command::CreateInput("XZGoal".to_string(), Vec::new()));
+    session.issue(Command::CreateInput("XYZ".to_string(), 3, Vec::new()));
+    session.issue(Command::CreateInput("XYGoal".to_string(), 2, Vec::new()));
+    session.issue(Command::CreateInput("XZGoal".to_string(), 2, Vec::new()));
 
     // Determine errors in the xy plane.
     session.issue(
-        Plan::source("XYZ")
+        Plan::source("XYZ", 3)
             .project(vec![0,1])
             .distinct()
             .negate()
-            .concat(Plan::source("XYGoal"))
+            .concat(Plan::source("XYGoal", 2))
             .consolidate()
             // .inspect("xy error")
             .into_rule("XYErrors"));
 
     // Determine errors in the xy plane.
     session.issue(
-        Plan::source("XYZ")
+        Plan::source("XYZ", 3)
             .project(vec![0,2])
             .distinct()
             .negate()
-            .concat(Plan::source("XZGoal"))
+            .concat(Plan::source("XZGoal", 2))
             .consolidate()
             // .inspect("xz error")
             .into_rule("XZErrors"));
@@ -81,10 +81,10 @@ fn main() {
 
     // Determine errors in the xy plane.
     session.issue(
-        Plan::source("XYErrors")
+        Plan::source("XYErrors", 2)
             .distinct()
             .project(vec![])
-            .concat(Plan::source("XZErrors").distinct().project(vec![]))
+            .concat(Plan::source("XZErrors", 2).distinct().project(vec![]))
             .consolidate()
             .inspect("error")
             .into_rule("Errors"));

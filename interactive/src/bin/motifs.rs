@@ -10,7 +10,7 @@ fn main() {
     let mut session = Session::new(socket);
 
     // Create initially empty set of edges.
-    session.issue(Command::CreateInput("Edges".to_string(), Vec::new()));
+    session.issue(Command::CreateInput("Edges".to_string(), 2, Vec::new()));
 
     let nodes = 5;
 
@@ -27,7 +27,7 @@ fn main() {
 
     session.issue(
         Plan::multiway_join(
-            vec![Plan::source("Edges"), Plan::source("Edges"), Plan::source("Edges")],
+            vec![Plan::source("Edges", 2), Plan::source("Edges", 2), Plan::source("Edges", 2)],
             vec![
                 vec![(0,1), (1,0)], // b == b
                 vec![(0,0), (0,2)], // a == a
@@ -54,12 +54,12 @@ fn main() {
     session.issue(
         Plan::multiway_join(
             vec![
-                Plan::source("Edges"),  // R0(a,b)
-                Plan::source("Edges"),  // R1(a,c)
-                Plan::source("Edges"),  // R2(a,d)
-                Plan::source("Edges"),  // R3(b,c)
-                Plan::source("Edges"),  // R4(b,d)
-                Plan::source("Edges"),  // R5(c,d)
+                Plan::source("Edges", 2),  // R0(a,b)
+                Plan::source("Edges", 2),  // R1(a,c)
+                Plan::source("Edges", 2),  // R2(a,d)
+                Plan::source("Edges", 2),  // R3(b,c)
+                Plan::source("Edges", 2),  // R4(b,d)
+                Plan::source("Edges", 2),  // R5(c,d)
             ],
             vec![
                 vec![(0,0), (0,1), (0,2)], // a

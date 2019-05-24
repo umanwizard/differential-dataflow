@@ -10,7 +10,7 @@ fn main() {
     let mut session = Session::new(socket);
 
     // Create initially empty set of edges.
-    session.issue(Command::CreateInput("Edges".to_string(), Vec::new()));
+    session.issue(Command::CreateInput("Edges".to_string(), 2, Vec::new()));
 
     for node in 0 .. 1000 {
         let edge = vec![Value::Usize(node), Value::Usize(node+1)];
@@ -18,11 +18,11 @@ fn main() {
     }
 
     // Create initially empty set of edges.
-    session.issue(Command::CreateInput("Nodes".to_string(), Vec::new()));
+    session.issue(Command::CreateInput("Nodes".to_string(), 1, Vec::new()));
 
     session.issue(
-        Plan::source("Nodes")
-            .join(Plan::source("Edges"), vec![(0, 0)])
+        Plan::source("Nodes", 1)
+            .join(Plan::source("Edges", 2), vec![(0, 0)])
             .project(vec![1])
             .inspect("one-hop")
             .into_rule("One-hop"));
@@ -32,26 +32,26 @@ fn main() {
     session.issue(Command::AdvanceTime(Duration::from_secs(2)));
 
     session.issue(
-        Plan::source("Nodes")
-            .join(Plan::source("Edges"), vec![(0, 0)])
+        Plan::source("Nodes", 1)
+            .join(Plan::source("Edges", 2), vec![(0, 0)])
             .project(vec![1])
-            .join(Plan::source("Edges"), vec![(0, 0)])
+            .join(Plan::source("Edges", 2), vec![(0, 0)])
             .project(vec![1])
-            .join(Plan::source("Edges"), vec![(0, 0)])
+            .join(Plan::source("Edges", 2), vec![(0, 0)])
             .project(vec![1])
-            .join(Plan::source("Edges"), vec![(0, 0)])
+            .join(Plan::source("Edges", 2), vec![(0, 0)])
             .project(vec![1])
-            .join(Plan::source("Edges"), vec![(0, 0)])
+            .join(Plan::source("Edges", 2), vec![(0, 0)])
             .project(vec![1])
-            .join(Plan::source("Edges"), vec![(0, 0)])
+            .join(Plan::source("Edges", 2), vec![(0, 0)])
             .project(vec![1])
-            .join(Plan::source("Edges"), vec![(0, 0)])
+            .join(Plan::source("Edges", 2), vec![(0, 0)])
             .project(vec![1])
-            .join(Plan::source("Edges"), vec![(0, 0)])
+            .join(Plan::source("Edges", 2), vec![(0, 0)])
             .project(vec![1])
-            .join(Plan::source("Edges"), vec![(0, 0)])
+            .join(Plan::source("Edges", 2), vec![(0, 0)])
             .project(vec![1])
-            .join(Plan::source("Edges"), vec![(0, 0)])
+            .join(Plan::source("Edges", 2), vec![(0, 0)])
             .project(vec![1])
             .inspect("ten-hop")
             .into_rule("Ten-hop"));

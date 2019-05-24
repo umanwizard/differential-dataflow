@@ -5,8 +5,8 @@ use std::hash::Hash;
 use timely::dataflow::Scope;
 
 use differential_dataflow::{Collection, ExchangeData};
-use plan::{Plan, Render};
-use {TraceManager, Time, Diff, Datum};
+use plan::{Plan, Render, Stash};
+use crate::{Diff, Datum};
 
 /// A plan which retains values at specified locations.
 ///
@@ -24,18 +24,19 @@ pub struct Map<V: Datum> {
 impl<V: ExchangeData+Hash+Datum> Render for Map<V> {
     type Value = V;
 
-    fn render<S: Scope<Timestamp = Time>>(
+    fn render<S: Scope>(
         &self,
         scope: &mut S,
-        collections: &mut std::collections::HashMap<Plan<Self::Value>, Collection<S, Vec<Self::Value>, Diff>>,
-        arrangements: &mut TraceManager<Self::Value>,
+        stash: &mut Stash<S, Self::Value>,
     ) -> Collection<S, Vec<Self::Value>, Diff>
+    where
+        S::Timestamp: differential_dataflow::lattice::Lattice,
     {
         let expressions = self.expressions.clone();
 
         // TODO: re-use `tuple` allocation.
         self.plan
-            .render(scope, collections, arrangements)
+            .render(scope, stash)
             .map(move |tuple|
                 expressions
                     .iter()

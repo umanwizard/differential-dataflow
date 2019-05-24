@@ -29,11 +29,11 @@ use std::hash::Hash;
 use timely::dataflow::Scope;
 
 use differential_dataflow::operators::Consolidate;
-use differential_dataflow::operators::arrange::{ArrangeBySelf, ArrangeByKey};
+use differential_dataflow::operators::arrange::ArrangeByKey;
 
 use differential_dataflow::{Collection, ExchangeData};
-use plan::{Plan, Render};
-use {TraceManager, Time, Diff, Datum};
+use plan::{Plan, Render, Stash};
+use crate::{Diff, Datum};
 
 /// A multiway join of muliple relations.
 ///
@@ -67,12 +67,13 @@ impl<V: ExchangeData+Hash+Datum> Render for MultiwayJoin<V> {
 
     type Value = V;
 
-    fn render<S: Scope<Timestamp = Time>>(
+    fn render<S: Scope>(
         &self,
         scope: &mut S,
-        collections: &mut std::collections::HashMap<Plan<Self::Value>, Collection<S, Vec<Self::Value>, Diff>>,
-        arrangements: &mut TraceManager<Self::Value>,
+        stash: &mut Stash<S, Self::Value>,
     ) -> Collection<S, Vec<Self::Value>, Diff>
+    where
+        S::Timestamp: differential_dataflow::lattice::Lattice,
     {
         // The idea here is the following:
         //
@@ -130,20 +131,22 @@ impl<V: ExchangeData+Hash+Datum> Render for MultiwayJoin<V> {
             // println!("\tinitial attributes: {:?}", attributes);
 
             // Ensure the plan is rendered and cached.
-            if arrangements.get_unkeyed(&plan).is_none() {
-                // println!("\tbuilding/caching source plan");
-                let collection = plan.render(scope, collections, arrangements);
-                arrangements.set_unkeyed(plan, &collection.arrange_by_self().trace);
-            }
-            else {
-                // println!("\tsource plan found");
-            }
+
+            // if arrangements.get_unkeyed(&plan).is_none() {
+            //     // println!("\tbuilding/caching source plan");
+            //     let collection = plan.render(scope, collections, arrangements);
+            //     arrangements.set_unkeyed(plan, &collection.arrange_by_self().trace);
+            // }
+            // else {
+            //     // println!("\tsource plan found");
+            // }
             let changes =
-            arrangements
-                .get_unkeyed(&plan)
-                .expect("Surely we just ensured this")
-                .import(scope)
-                .as_collection(|val,&()| val.clone())
+            plan.render(scope, stash)
+            // arrangements
+            //     .get_unkeyed(&plan)
+            //     .expect("Surely we just ensured this")
+            //     .import(scope)
+            //     .as_collection(|val,&()| val.clone())
                 .map(move |tuple| attributes_init.iter().map(|&(attr,_)|
                     tuple[attr].clone()).collect::<Vec<_>>()
                 );
@@ -199,24 +202,22 @@ impl<V: ExchangeData+Hash+Datum> Render for MultiwayJoin<V> {
                 // Get a plan for the projection on to these few attributes.
                 let plan = self.sources[join_idx].clone().project(projection);
 
-                if arrangements.get_keyed(&plan, &keys[..]).is_none() {
+                if stash.get_local(&plan, Some(&keys[..])).is_none() {
                     // println!("\tbuilding key: {:?}, plan: {:?}", keys, plan);
                     let keys_clone = keys.clone();
                     let arrangement =
-                    plan.render(scope, collections, arrangements)
+                    plan.render(scope, stash)
                         .map(move |tuple| (keys_clone.iter().map(|&i| tuple[i].clone()).collect::<Vec<_>>(), tuple))
                         .arrange_by_key();
 
-                    arrangements.set_keyed(&plan, &keys[..], &arrangement.trace);
-                }
-                else {
-                    // println!("\tplan found: {:?}, {:?}", keys, plan);
+                    stash.set_local(plan.clone(), Some(&keys[..]), arrangement);
                 }
 
                 let arrangement =
-                arrangements
-                    .get_keyed(&plan, &keys[..])
-                    .expect("Surely we just ensured this");
+                stash
+                    .get_local(&plan, Some(&keys[..]))
+                    .expect("Surely we just ensured this")
+                    .clone();
 
                 let key_selector = std::rc::Rc::new(move |change: &Vec<V>|
                     priors.iter().map(|&p| change[p].clone()).collect::<Vec<_>>()
@@ -249,11 +250,11 @@ impl<V: ExchangeData+Hash+Datum> Render for MultiwayJoin<V> {
                     // tuple in the cursor.
                     changes =
                     if join_idx < index {
-                        let arrangement = trace.import(scope).enter_at(inner, |_,_,t| AltNeu::alt(t.clone()));
+                        let arrangement = trace.enter_at(inner, |_,_,t| AltNeu::alt(t.clone()));
                         dogsdogsdogs::operators::propose(&changes, arrangement, key_selector)
                     }
                     else {
-                        let arrangement = trace.import(scope).enter_at(inner, |_,_,t| AltNeu::neu(t.clone()));
+                        let arrangement = trace.enter_at(inner, |_,_,t| AltNeu::neu(t.clone()));
                         dogsdogsdogs::operators::propose(&changes, arrangement, key_selector)
                     }
                     .map(|(mut prefix, extensions)| { prefix.extend(extensions.into_iter()); prefix })

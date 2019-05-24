@@ -22,7 +22,7 @@ pub enum Command<V: Datum> {
     /// Advances all inputs and traces to `time`, and advances computation.
     AdvanceTime(Time),
     /// Creates a new named input, with initial input.
-    CreateInput(String, Vec<Vec<V>>),
+    CreateInput(String, usize, Vec<Vec<V>>),
     /// Introduces updates to a specified input.
     UpdateInput(String, Vec<(Vec<V>, Time, Diff)>),
     /// Closes a specified input.
@@ -43,7 +43,7 @@ impl<V: Datum> From<Rule<V>> for Command<V> {
 
 impl<V: Datum> Command<V>
 where
-    V: ExchangeData+Hash+LoggingValue,
+    V: ExchangeData+Hash+LoggingValue+From<usize>,
 {
 
     /// Executes a command.
@@ -69,24 +69,37 @@ where
                 worker.dataflow(|scope| {
 
                     use timely::dataflow::operators::Probe;
-                    use differential_dataflow::operators::arrange::ArrangeBySelf;
+                    use differential_dataflow::operators::arrange::ArrangeByKey;
                     use plan::Render;
 
-                    let mut collections = std::collections::HashMap::new();
-                    // let mut arrangements = std::collections::HashMap::new();
+                    let mut stash = crate::plan::Stash::new();
+                    let mut local = std::collections::HashMap::new(); // map from name -> Variable
+
+                    // Create `Variable` for each named rule.
+                    for Rule { name, plan } in query.rules.iter() {
+                        let variable = differential_dataflow::operators::iterate::Variable::new(scope, std::time::Duration::from_secs(1));
+                        let results = variable.map(|x| (x,vec![])).arrange_by_key();
+                        stash.set_local(Plan::local(name, plan.arity), None, results);
+                        local.insert(name.to_owned(), variable);
+                    }
 
                     for Rule { name, plan } in query.rules.into_iter() {
                         let collection =
-                        plan.render(scope, &mut collections, &mut manager.traces)
-                            .arrange_by_self();
+                        plan.render(scope, &mut stash)
+                            .map(|x| (x,vec![]))
+                            .arrange_by_key();
 
                         collection.stream.probe_with(&mut manager.probe);
                         let trace = collection.trace;
 
                         // Can bind the trace to both the plan and the name.
-                        manager.traces.set_unkeyed(&plan, &trace);
-                        manager.traces.set_unkeyed(&Plan::Source(name), &trace);
+                        manager.traces.set(&plan, None, &trace);
+                        manager.traces.set(&Plan::source(&name, plan.arity), None, &trace);
                     }
+
+                    // Sort the local variables for consistent drop order.
+                    let mut local = local.drain().collect::<Vec<_>>();
+                    local.sort_by(|x,y| x.0.cmp(&y.0));
 
                 });
             },
@@ -98,18 +111,18 @@ where
                 }
             },
 
-            Command::CreateInput(name, updates) => {
+            Command::CreateInput(name, arity, updates) => {
 
                 use differential_dataflow::input::Input;
-                use differential_dataflow::operators::arrange::ArrangeBySelf;
+                use differential_dataflow::operators::arrange::ArrangeByKey;
 
                 let (input, trace) = worker.dataflow(|scope| {
                     let (input, collection) = scope.new_collection_from(updates.into_iter());
-                    let trace = collection.arrange_by_self().trace;
+                    let trace = collection.map(|x| (x,vec![])).arrange_by_key().trace;
                     (input, trace)
                 });
 
-                manager.insert_input(name, input, trace);
+                manager.insert_input(name, arity, input, trace);
 
             },
 
