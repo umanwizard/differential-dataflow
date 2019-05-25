@@ -28,10 +28,9 @@ use std::hash::Hash;
 
 use timely::dataflow::Scope;
 
-use differential_dataflow::operators::Consolidate;
 use differential_dataflow::operators::arrange::ArrangeByKey;
-
 use differential_dataflow::{Collection, ExchangeData};
+
 use plan::{Plan, Render, Stash};
 use crate::{Diff, Datum};
 
@@ -297,8 +296,7 @@ impl<V: ExchangeData+Hash+Datum> Render for MultiwayJoin<V> {
             accumulated_changes.push(changes);
         }
 
-        differential_dataflow::collection::concatenate(scope, accumulated_changes.into_iter())
-            .consolidate()
+        differential_dataflow::collection::concatenate(scope, accumulated_changes)
     }
 }
 

@@ -73,12 +73,15 @@ where
                     // Import traces into `scope`.
                     let mut imports = Vec::new();
                     for (plan, keys) in query.imports.drain(..) {
+
+                        let name: String = if let crate::plan::PlanNode::Source(name) = &plan.node { format!("Import: {}", name) } else { "arranged".to_owned() };
+
                         let import =
                         manager
                             .traces
                             .get(&plan, Some(&keys[..]))
                             .expect("Failed to find import")
-                            .import(scope);
+                            .import_named(scope, &name);
 
                         imports.push((plan, keys, import));
                     }
@@ -97,9 +100,9 @@ where
 
                         // Create a `Variable` for each named rule.
                         for Rule { name, plan } in query.rules.iter() {
-                            use differential_dataflow::operators::iterate::Variable;
+                            use differential_dataflow::operators::iterate::MonoidVariable;
                             use timely::order::Product;
-                            let variable = Variable::new(inner, Product::new(Default::default(), 1));
+                            let variable = MonoidVariable::new(inner, Product::new(Default::default(), 1));
                             stash.collections.insert(Plan::source(name, plan.arity), variable.clone());
                             local.insert(name.to_owned(), variable);
                         }
