@@ -33,14 +33,16 @@ impl<V: ExchangeData+Hash+Datum> Render for Join<V> {
         stash: &mut Stash<S, Self::Value>,
     ) -> Collection<S, Vec<Self::Value>, Diff>
     where
-        S::Timestamp: differential_dataflow::lattice::Lattice,
+        S::Timestamp: differential_dataflow::lattice::Lattice+timely::progress::timestamp::Refines<crate::Time>,
     {
         use differential_dataflow::operators::arrange::ArrangeByKey;
 
         // acquire arrangements for each input.
         let keys1 = self.keys.iter().map(|key| key.0).collect::<Vec<_>>();
+        let vals1 = (0 .. self.plan1.arity).filter(|i| !keys1.contains(i)).collect::<Vec<_>>();
         if stash.get_local(&self.plan1, Some(&keys1[..])).is_none() {
             let keys = keys1.clone();
+            let vals = vals1.clone();
             let arrangement =
             self.plan1
                 .render(scope, stash)
@@ -48,12 +50,7 @@ impl<V: ExchangeData+Hash+Datum> Render for Join<V> {
                     (
                         // TODO: Re-use `tuple` for values.
                         keys.iter().map(|index| tuple[*index].clone()).collect::<Vec<_>>(),
-                        tuple
-                            .into_iter()
-                            .enumerate()
-                            .filter(|(index,_value)| !keys.contains(index))
-                            .map(|(_index,value)| value)
-                            .collect::<Vec<_>>(),
+                        vals.iter().map(|index| tuple[*index].clone()).collect::<Vec<_>>(),
                     )
                 )
                 .arrange_by_key();
@@ -63,8 +60,10 @@ impl<V: ExchangeData+Hash+Datum> Render for Join<V> {
 
         // extract relevant fields for each index.
         let keys2 = self.keys.iter().map(|key| key.1).collect::<Vec<_>>();
+        let vals2 = (0 .. self.plan2.arity).filter(|i| !keys2.contains(i)).collect::<Vec<_>>();
         if stash.get_local(&self.plan2, Some(&keys2[..])).is_none() {
             let keys = keys2.clone();
+            let vals = vals2.clone();
             let arrangement =
             self.plan2
                 .render(scope, stash)
@@ -72,12 +71,7 @@ impl<V: ExchangeData+Hash+Datum> Render for Join<V> {
                     (
                         // TODO: Re-use `tuple` for values.
                         keys.iter().map(|index| tuple[*index].clone()).collect::<Vec<_>>(),
-                        tuple
-                            .into_iter()
-                            .enumerate()
-                            .filter(|(index,_value)| !keys.contains(index))
-                            .map(|(_index,value)| value)
-                            .collect::<Vec<_>>(),
+                        vals.iter().map(|index| tuple[*index].clone()).collect::<Vec<_>>(),
                     )
                 )
                 .arrange_by_key();

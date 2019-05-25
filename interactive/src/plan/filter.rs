@@ -90,7 +90,7 @@ impl<V: ExchangeData+Hash+Datum> Render for Filter<V> {
         stash: &mut Stash<S, Self::Value>,
     ) -> Collection<S, Vec<Self::Value>, Diff>
     where
-        S::Timestamp: differential_dataflow::lattice::Lattice,
+        S::Timestamp: differential_dataflow::lattice::Lattice+timely::progress::timestamp::Refines<crate::Time>,
     {
         let predicate = self.predicate.clone();
         self.plan

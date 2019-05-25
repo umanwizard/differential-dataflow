@@ -22,7 +22,12 @@ fn main() {
             .concat(Plan::source("XYGoal", 2))
             .consolidate()
             // .inspect("xy error")
-            .into_rule("XYErrors"));
+            .into_rule("XYErrors")
+            .into_query()
+            .add_import(Plan::source("XYZ", 3), vec![0,1,2])
+            .add_import(Plan::source("XYGoal", 2), vec![0,1])
+            .add_publish(Plan::source("XYErrors", 2), vec![0,1])
+    );
 
     // Determine errors in the xy plane.
     session.issue(
@@ -33,7 +38,12 @@ fn main() {
             .concat(Plan::source("XZGoal", 2))
             .consolidate()
             // .inspect("xz error")
-            .into_rule("XZErrors"));
+            .into_rule("XZErrors")
+            .into_query()
+            .add_import(Plan::source("XYZ", 3), vec![0,1,2])
+            .add_import(Plan::source("XZGoal", 2), vec![0,1])
+            .add_publish(Plan::source("XZErrors", 2), vec![0,1])
+    );
 
     session.issue(Command::AdvanceTime(Duration::from_secs(1)));
 
@@ -87,7 +97,11 @@ fn main() {
             .concat(Plan::source("XZErrors", 2).distinct().project(vec![]))
             .consolidate()
             .inspect("error")
-            .into_rule("Errors"));
+            .into_rule("Errors")
+            .into_query()
+            .add_import(Plan::source("XYErrors", 2), vec![0,1])
+            .add_import(Plan::source("XZErrors", 2), vec![0,1])
+    );
 
     session.issue(Command::AdvanceTime(Duration::from_secs(2)));
 

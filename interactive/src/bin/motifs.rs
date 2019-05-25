@@ -12,7 +12,7 @@ fn main() {
     // Create initially empty set of edges.
     session.issue(Command::CreateInput("Edges".to_string(), 2, Vec::new()));
 
-    let nodes = 5;
+    let nodes = std::env::args().nth(1).expect("must supply number of nodes").parse().expect("couldn't parse number of nodes");
 
     for node_0 in 0 .. (nodes / 2) {
         println!("Inserting node: {}", node_0);
@@ -27,7 +27,11 @@ fn main() {
 
     session.issue(
         Plan::multiway_join(
-            vec![Plan::source("Edges", 2), Plan::source("Edges", 2), Plan::source("Edges", 2)],
+            vec![
+                Plan::source("Edges", 2),
+                Plan::source("Edges", 2),
+                Plan::source("Edges", 2),
+            ],
             vec![
                 vec![(0,1), (1,0)], // b == b
                 vec![(0,0), (0,2)], // a == a
@@ -38,7 +42,10 @@ fn main() {
         .project(vec![])
         .consolidate()
         .inspect("triangles")
-        .into_rule("triangles"));
+        .into_rule("triangles")
+        .into_query()
+        .add_import(Plan::source("Edges", 2), vec![0,1])
+    );
 
 
     for node_0 in (nodes / 2) .. nodes {
@@ -67,12 +74,15 @@ fn main() {
                 vec![(1,1), (1,3), (0,5)], // c
                 vec![(1,2), (1,4), (1,5)], // d
             ],
-            vec![(0,0), (1,0), (1,1), (1,2)],
+            vec![(0,0), (1,0), (1,1), (1,2)], // (a, b, c, d)
         )
         .project(vec![])
         .consolidate()
         .inspect("4cliques")
-        .into_rule("4cliques"));
+        .into_rule("4cliques")
+        .into_query()
+        .add_import(Plan::source("Edges", 2), vec![0,1])
+    );
 
     session.issue(Command::Shutdown);
 }

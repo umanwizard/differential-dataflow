@@ -28,6 +28,7 @@ fn main() {
             let listener = TcpListener::bind("127.0.0.1:8000".to_string()).expect("failed to bind listener");
             for mut stream in listener.incoming() {
                 let mut stream = stream.expect("listener error");
+                let mut stream = std::io::BufReader::new(stream);
                 let send = send.clone();
                 let thread = thread.clone();
                 std::thread::Builder::new()
@@ -58,6 +59,14 @@ fn main() {
 
         let mut manager = Manager::<Value>::new();
         let mut sequencer: Option<Sequencer<Command<Value>>> = Some(Sequencer::new(worker, timer));
+
+        // worker
+        //     .log_register()
+        //     .insert::<timely::logging::TimelyEvent,_>("timely", move |time, data| if !data.is_empty() { println!("{:?}\t{:?}", time, data); });
+
+        // worker
+        //     .log_register()
+        //     .insert::<differential_dataflow::logging::DifferentialEvent,_>("differential/arrange", move |time, data| if !data.is_empty() { println!("{:?}\t{:?}", time, data); });
 
         while sequencer.is_some() {
 

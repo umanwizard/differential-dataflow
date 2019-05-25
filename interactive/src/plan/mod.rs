@@ -3,10 +3,12 @@
 use std::hash::Hash;
 use std::collections::HashMap;
 
-use timely::dataflow::Scope;
+use timely::progress::timestamp::Refines;
+use timely::dataflow::{Scope, ScopeParent};
 use differential_dataflow::{Collection, ExchangeData};
 use differential_dataflow::operators::arrange::Arranged;
 use differential_dataflow::lattice::Lattice;
+use differential_dataflow::trace::wrappers::enter::TraceEnter;
 
 use crate::Diff;
 use crate::manager::TraceValHandle;
@@ -17,7 +19,7 @@ pub mod join;
 pub mod map;
 pub mod sfw;
 
-use crate::Datum;
+use crate::{Time, Datum};
 
 // pub use self::count::Count;
 pub use self::filter::{Filter, Predicate};
@@ -25,22 +27,27 @@ pub use self::join::Join;
 pub use self::sfw::MultiwayJoin;
 pub use self::map::Map;
 
+// Local type definition to avoid the horror in signatures.
+type Arrangement<S, V> = Arranged<S, TraceValHandle<Vec<V>, Vec<V>, <S as ScopeParent>::Timestamp, Diff>>;
+type ArrangementImport<S, V> = Arranged<S, TraceEnter<TraceValHandle<Vec<V>, Vec<V>, Time, Diff>, <S as ScopeParent>::Timestamp>>;
+
 /// Dataflow-local collections and arrangements.
 pub struct Stash<S: Scope, V: ExchangeData+Datum>
 where
-    S::Timestamp: Lattice,
+    S::Timestamp: Lattice+timely::progress::timestamp::Refines<Time>,
 {
-    collections: HashMap<Plan<V>, Collection<S, Vec<V>, Diff>>,
-    local: HashMap<Plan<V>, HashMap<Vec<usize>, Arranged<S, TraceValHandle<Vec<V>, Vec<V>, S::Timestamp, Diff>>>>,
-    trace: HashMap<Plan<V>, HashMap<Vec<usize>, Arranged<S, TraceValHandle<Vec<V>, Vec<V>, S::Timestamp, Diff>>>>,
+    ///
+    pub collections: HashMap<Plan<V>, Collection<S, Vec<V>, Diff>>,
+    local: HashMap<Plan<V>, HashMap<Vec<usize>, Arrangement<S, V>>>,
+    trace: HashMap<Plan<V>, HashMap<Vec<usize>, ArrangementImport<S, V>>>,
 }
 
 impl<S: Scope, V: ExchangeData+Datum> Stash<S, V>
 where
-    S::Timestamp: Lattice,
+    S::Timestamp: Lattice+Refines<Time>,
 {
     /// Retrieves an arrangement from a plan and keys.
-    pub fn get_local(&self, plan: &Plan<V>, keys: Option<&[usize]>) -> Option<&Arranged<S, TraceValHandle<Vec<V>, Vec<V>, S::Timestamp, Diff>>> {
+    pub fn get_local(&self, plan: &Plan<V>, keys: Option<&[usize]>) -> Option<&Arrangement<S, V>> {
         if let Some(keys) = keys {
             self.local.get(plan).and_then(|x| x.get(keys))
         }
@@ -50,17 +57,15 @@ where
         }
     }
     /// Binds a plan and keys to an arrangement.
-    pub fn set_local(&mut self, plan: Plan<V>, keys: Option<&[usize]>, arranged: Arranged<S, TraceValHandle<Vec<V>, Vec<V>, S::Timestamp, Diff>>) {
+    pub fn set_local(&mut self, plan: Plan<V>, keys: Option<&[usize]>, arranged: Arrangement<S, V>) {
         let keys = keys.map(|k| k.to_vec()).unwrap_or((0 .. plan.arity).collect());
         self.local
             .entry(plan)
             .or_insert_with(|| HashMap::new())
             .insert(keys, arranged);
     }
-
-
     /// Retrieves an arrangement from a plan and keys.
-    pub fn get_trace(&self, plan: &Plan<V>, keys: Option<&[usize]>) -> Option<&Arranged<S, TraceValHandle<Vec<V>, Vec<V>, S::Timestamp, Diff>>> {
+    pub fn get_trace(&self, plan: &Plan<V>, keys: Option<&[usize]>) -> Option<&ArrangementImport<S, V>> {
         if let Some(keys) = keys {
             self.trace.get(plan).and_then(|x| x.get(keys))
         }
@@ -70,7 +75,7 @@ where
         }
     }
     /// Binds a plan and keys to an arrangement.
-    pub fn set_trace(&mut self, plan: Plan<V>, keys: Option<&[usize]>, arranged: Arranged<S, TraceValHandle<Vec<V>, Vec<V>, S::Timestamp, Diff>>) {
+    pub fn set_trace(&mut self, plan: Plan<V>, keys: Option<&[usize]>, arranged: ArrangementImport<S, V>) {
         let keys = keys.map(|k| k.to_vec()).unwrap_or((0 .. plan.arity).collect());
         self.trace
             .entry(plan)
@@ -102,7 +107,7 @@ pub trait Render : Sized {
         &self,
         scope: &mut S,
         stash: &mut Stash<S, Self::Value>,
-    ) -> Collection<S, Vec<Self::Value>, Diff> where S::Timestamp: Lattice;
+    ) -> Collection<S, Vec<Self::Value>, Diff> where S::Timestamp: Lattice+Refines<Time>;
 }
 
 /// Possible query plan types.
@@ -135,8 +140,8 @@ pub enum PlanNode<V: Datum> {
     Filter(Filter<V>),
     /// Sources data from outside the dataflow.
     Source(String),
-    /// A dataflow-local bound collection.
-    Local(String),
+    // /// A dataflow-local bound collection.
+    // Local(String),
     /// Prints resulting updates.
     Inspect(String, Box<Plan<V>>),
 }
@@ -235,13 +240,13 @@ impl<V: ExchangeData+Hash+Datum> Plan<V> {
             node: PlanNode::Source(name.to_string()),
         }
     }
-    /// Loads a source of data by name.
-    pub fn local(name: &str, arity: usize) -> Self {
-        Plan {
-            arity: arity,
-            node: PlanNode::Local(name.to_string()),
-        }
-    }
+    // /// Loads a source of data by name.
+    // pub fn local(name: &str, arity: usize) -> Self {
+    //     Plan {
+    //         arity: arity,
+    //         node: PlanNode::Local(name.to_string()),
+    //     }
+    // }
     /// Prints each tuple prefixed by `text`.
     pub fn inspect(self, text: &str) -> Self {
         Plan {
@@ -268,8 +273,13 @@ impl<V: ExchangeData+Hash+Datum> Render for Plan<V> {
         stash: &mut Stash<S, Self::Value>,
     ) -> Collection<S, Vec<Self::Value>, Diff>
     where
-        S::Timestamp: differential_dataflow::lattice::Lattice,
+        S::Timestamp: differential_dataflow::lattice::Lattice+timely::progress::timestamp::Refines<crate::Time>,
     {
+        // If we have a stashed collection, great!
+        // If we have a stashed arrangement, great!
+        // If we have an imported arrangement, great!
+        // Otherwise, we should build it and stash as a collection.
+
         if stash.collections.get(self).is_none() {
 
             let collection =
@@ -316,13 +326,17 @@ impl<V: ExchangeData+Hash+Datum> Render for Plan<V> {
                         .as_collection()
                 }
                 PlanNode::Consolidate(ref input) => {
-                    // if let Some(mut trace) = arrangements.get_unkeyed(&self) {
-                    //     trace.import(scope).as_collection(|k,&()| k.clone())
-                    // }
-                    // else {
+                    // NOTE: `cloned()` to avoid borrow checker (NLL issue?)
+                    if let Some(local) = stash.get_local(input, None).cloned() {
+                        local.as_collection(|k,_| k.to_vec())
+                    }
+                    else if let Some(trace) = stash.get_trace(self, None).cloned() {
+                        trace.as_collection(|k,_| k.to_vec())
+                    }
+                    else {
                         use differential_dataflow::operators::Consolidate;
                         input.render(scope, stash).consolidate()
-                    // }
+                    }
                 },
                 PlanNode::Join(ref join) => join.render(scope, stash),
                 PlanNode::MultiwayJoin(ref join) => join.render(scope, stash),
@@ -331,16 +345,15 @@ impl<V: ExchangeData+Hash+Datum> Render for Plan<V> {
                 },
                 PlanNode::Filter(ref filter) => filter.render(scope, stash),
                 PlanNode::Source(ref source) => {
-                    stash
-                        .get_trace(self, None)
-                        .expect(&format!("Failed to find source collection: {:?}", source))
-                        .as_collection(|k,_| k.to_vec())
-                },
-                PlanNode::Local(ref source) => {
-                    stash
-                        .get_trace(self, None)
-                        .expect(&format!("Failed to find local collection: {:?}", source))
-                        .as_collection(|k,_| k.to_vec())
+                    if let Some(local) = stash.get_local(self, None) {
+                        local.as_collection(|k,_| k.to_vec())
+                    }
+                    else if let Some(trace) = stash.get_trace(self, None) {
+                        trace.as_collection(|k,_| k.to_vec())
+                    }
+                    else {
+                        panic!(format!("Failed to find source collection: {:?}", source));
+                    }
                 },
                 PlanNode::Inspect(ref text, ref plan) => {
                     let text = text.clone();

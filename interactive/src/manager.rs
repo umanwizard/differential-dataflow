@@ -2,14 +2,10 @@
 
 use std::collections::HashMap;
 use std::hash::Hash;
-// use std::time::Duration;
 
-use timely::dataflow::ProbeHandle;
 use timely::communication::Allocate;
 use timely::worker::Worker;
 use timely::logging::TimelyEvent;
-
-// use timely::dataflow::operators::capture::event::EventIterator;
 
 use differential_dataflow::ExchangeData;
 use differential_dataflow::trace::implementations::ord::{OrdKeySpine, OrdValSpine};
@@ -35,22 +31,26 @@ pub struct Manager<V: ExchangeData+Datum> {
     pub inputs: InputManager<V>,
     /// Manages maintained traces.
     pub traces: TraceManager<V>,
-    /// Probes all computations.
-    pub probe: ProbeHandle<Time>,
 }
 
-impl<V: ExchangeData+Datum> Manager<V>
-// where
-//     V: ExchangeData+Hash+LoggingValue,
-{
+impl<V: ExchangeData+Datum> Manager<V> {
 
     /// Creates a new empty manager.
     pub fn new() -> Self {
         Manager {
             inputs: InputManager::new(),
             traces: TraceManager::new(),
-            probe: ProbeHandle::new(),
         }
+    }
+
+    /// True iff any maintained trace is less than `time`.
+    pub fn less_than(&mut self, time: &Time) -> bool {
+        let mut antichain = timely::progress::Antichain::new();
+        self.traces.arrangements.values_mut().any(|v| v.values_mut().any(|t| {
+            use differential_dataflow::trace::TraceReader;
+            t.read_upper(&mut antichain);
+            antichain.less_than(time)
+        }))
     }
 
     // /// Enables logging of timely and differential events.
@@ -159,17 +159,8 @@ impl<V: ExchangeData> InputManager<V> {
 /// Manages a map from plan (describing a collection)
 /// to various arranged forms of that collection.
 pub struct TraceManager<V: ExchangeData+Datum> {
-
-    // /// Arrangements where the record itself is they key.
-    // ///
-    // /// This contains both input collections, which are here cached so that
-    // /// they can be re-used, intermediate collections that are cached, and
-    // /// any collections that are explicitly published.
-    // inputs: HashMap<Plan<V>, KeysOnlyHandle<V>>,
-
     /// Arrangements of collections by key.
     arrangements: HashMap<Plan<V>, HashMap<Vec<usize>, KeysValsHandle<V>>>,
-
 }
 
 impl<V: ExchangeData+Hash+Datum> TraceManager<V> {
@@ -185,12 +176,7 @@ impl<V: ExchangeData+Hash+Datum> TraceManager<V> {
     /// Advances the frontier of each maintained trace.
     pub fn advance_time(&mut self, time: &Time) {
         use differential_dataflow::trace::TraceReader;
-
         let frontier = &[time.clone()];
-        // for trace in self.inputs.values_mut() {
-        //     trace.advance_by(frontier);
-        //     trace.distinguish_since(frontier);
-        // }
         for map in self.arrangements.values_mut() {
             for trace in map.values_mut() {
                 trace.advance_by(frontier);
@@ -198,19 +184,6 @@ impl<V: ExchangeData+Hash+Datum> TraceManager<V> {
             }
         }
     }
-
-    // /// Recover an arrangement by plan and keys, if it is cached.
-    // pub fn get_unkeyed(&self, plan: &Plan<V>) -> Option<KeysOnlyHandle<V>> {
-    //     self.inputs
-    //         .get(plan)
-    //         .map(|x| x.clone())
-    // }
-
-    // /// Installs an unkeyed arrangement for a specified plan.
-    // pub fn set_unkeyed(&mut self, plan: &Plan<V>, handle: &KeysOnlyHandle<V>) {
-    //     self.inputs
-    //         .insert(plan.clone(), handle.clone());
-    // }
 
     /// Recover an arrangement by plan and keys, if it is cached.
     pub fn get(&self, plan: &Plan<V>, keys: Option<&[usize]>) -> Option<KeysValsHandle<V>> {
@@ -229,18 +202,10 @@ impl<V: ExchangeData+Hash+Datum> TraceManager<V> {
 
     /// Installs a keyed arrangement for a specified plan and sequence of keys.
     pub fn set(&mut self, plan: &Plan<V>, keys: Option<&[usize]>, handle: &KeysValsHandle<V>) {
-        if let Some(keys) = keys {
-            self.arrangements
-                .entry(plan.clone())
-                .or_insert(HashMap::new())
-                .insert(keys.to_vec(), handle.clone());
-        }
-        else {
-            let keys = (0 .. plan.arity).collect::<Vec<_>>();
-            self.arrangements
-                .entry(plan.clone())
-                .or_insert(HashMap::new())
-                .insert(keys.to_vec(), handle.clone());
-        }
+        let keys = keys.map(|x| x.to_vec()).unwrap_or((0 .. plan.arity).collect::<Vec<_>>());
+        self.arrangements
+            .entry(plan.clone())
+            .or_insert(HashMap::new())
+            .insert(keys, handle.clone());
     }
 }

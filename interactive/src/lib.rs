@@ -57,16 +57,30 @@ pub trait VectorFrom<T> : Sized {
 pub struct Query<V: Datum> {
     /// A list of bindings of names to plans.
     pub rules: Vec<Rule<V>>,
+    /// A list of arrangements to import.
+    pub imports: Vec<(Plan<V>, Vec<usize>)>,
+    /// A list of arrangements to publish.
+    pub publish: Vec<(Plan<V>, Vec<usize>)>,
 }
 
 impl<V: Datum> Query<V> {
     /// Creates a new, empty query.
     pub fn new() -> Self {
-        Query { rules: Vec::new() }
+        Query { rules: Vec::new(), imports: Vec::new(), publish: Vec::new(), }
     }
     /// Adds a rule to an existing query.
     pub fn add_rule(mut self, rule: Rule<V>) -> Self {
         self.rules.push(rule);
+        self
+    }
+    /// Adds an external trace to import.
+    pub fn add_import(mut self, plan: Plan<V>, keys: Vec<usize>) -> Self {
+        self.imports.push((plan, keys));
+        self
+    }
+    /// Adds an internal trace to export.
+    pub fn add_publish(mut self, plan: Plan<V>, keys: Vec<usize>) -> Self {
+        self.publish.push((plan, keys));
         self
     }
 }

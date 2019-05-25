@@ -22,7 +22,7 @@ pub enum Command<V: Datum> {
     /// Advances all inputs and traces to `time`, and advances computation.
     AdvanceTime(Time),
     /// Creates a new named input, with initial input.
-    CreateInput(String, usize, Vec<Vec<V>>),
+    CreateInput(String, usize, Vec<Vec<usize>>),
     /// Introduces updates to a specified input.
     UpdateInput(String, Vec<(Vec<V>, Time, Diff)>),
     /// Closes a specified input.
@@ -45,13 +45,12 @@ impl<V: Datum> Command<V>
 where
     V: ExchangeData+Hash+LoggingValue+From<usize>,
 {
-
     /// Executes a command.
     pub fn execute<A: Allocate>(self, manager: &mut Manager<V>, worker: &mut Worker<A>) {
 
         match self {
 
-            Command::Query(query) => {
+            Command::Query(mut query) => {
 
                 // Query construction requires a bit of guff to allow us to
                 // re-use as much stuff as possible. It *seems* we need to
@@ -66,64 +65,118 @@ where
                 // traces, and the types present in imported traces are not
                 // the same as those in arrangements.
 
-                worker.dataflow(|scope| {
+                worker.dataflow(move |scope| {
 
-                    use timely::dataflow::operators::Probe;
                     use differential_dataflow::operators::arrange::ArrangeByKey;
                     use plan::Render;
 
-                    let mut stash = crate::plan::Stash::new();
-                    let mut local = std::collections::HashMap::new(); // map from name -> Variable
+                    // Import traces into `scope`.
+                    let mut imports = Vec::new();
+                    for (plan, keys) in query.imports.drain(..) {
+                        let import =
+                        manager
+                            .traces
+                            .get(&plan, Some(&keys[..]))
+                            .expect("Failed to find import")
+                            .import(scope);
 
-                    // Create `Variable` for each named rule.
-                    for Rule { name, plan } in query.rules.iter() {
-                        let variable = differential_dataflow::operators::iterate::Variable::new(scope, std::time::Duration::from_secs(1));
-                        let results = variable.map(|x| (x,vec![])).arrange_by_key();
-                        stash.set_local(Plan::local(name, plan.arity), None, results);
-                        local.insert(name.to_owned(), variable);
+                        imports.push((plan, keys, import));
                     }
 
-                    for Rule { name, plan } in query.rules.into_iter() {
-                        let collection =
-                        plan.render(scope, &mut stash)
-                            .map(|x| (x,vec![]))
-                            .arrange_by_key();
+                    // Build iterative subscope.
+                    use timely::dataflow::Scope;
+                    scope.iterative::<usize,_,_>(move |inner| {
 
-                        collection.stream.probe_with(&mut manager.probe);
-                        let trace = collection.trace;
+                        let mut stash = crate::plan::Stash::new();
+                        let mut local = std::collections::HashMap::new(); // map from name -> Variable
 
-                        // Can bind the trace to both the plan and the name.
-                        manager.traces.set(&plan, None, &trace);
-                        manager.traces.set(&Plan::source(&name, plan.arity), None, &trace);
-                    }
+                        // Complete import process.
+                        for (plan, keys, trace) in imports.into_iter() {
+                            stash.set_trace(plan, Some(&keys[..]), trace.enter(inner));
+                        }
 
-                    // Sort the local variables for consistent drop order.
-                    let mut local = local.drain().collect::<Vec<_>>();
-                    local.sort_by(|x,y| x.0.cmp(&y.0));
+                        // Create a `Variable` for each named rule.
+                        for Rule { name, plan } in query.rules.iter() {
+                            use differential_dataflow::operators::iterate::Variable;
+                            use timely::order::Product;
+                            let variable = Variable::new(inner, Product::new(Default::default(), 1));
+                            stash.collections.insert(Plan::source(name, plan.arity), variable.clone());
+                            local.insert(name.to_owned(), variable);
+                        }
 
+                        // Render each rule and bind variable definition.
+                        for Rule { name, plan } in query.rules.drain(..) {
+                            let collection = plan.render(inner, &mut stash);
+                            local.remove(&name)
+                                 .expect("Variable missing!")
+                                 .set(&collection);
+                        }
+
+                        // Fish out collections that should be published.
+                        for (plan, keys) in query.publish.drain(..) {
+                            let keys_clone = keys.to_vec();
+                            let vals = (0 .. plan.arity).filter(|i| !keys.contains(i)).collect::<Vec<_>>();
+                            let trace =
+                            plan.render(inner, &mut stash)
+                                .leave()
+                                .map(move |tuple|
+                                    (
+                                        keys.iter().map(|i| tuple[*i].clone()).collect::<Vec<_>>(),
+                                        vals.iter().map(|i| tuple[*i].clone()).collect::<Vec<_>>(),
+                                    )
+                                )
+                                .arrange_by_key()
+                                .trace;
+
+                            manager.traces.set(&plan, Some(&keys_clone[..]), &trace);
+                        }
+
+                        // Avoid non-deterministic drop order.
+                        assert!(local.is_empty());
+                    });
                 });
             },
 
             Command::AdvanceTime(time) => {
                 manager.advance_time(&time);
-                while manager.probe.less_than(&time) {
+                while manager.less_than(&time) {
                     worker.step();
                 }
             },
 
-            Command::CreateInput(name, arity, updates) => {
+            Command::CreateInput(name, arity, keys) => {
 
                 use differential_dataflow::input::Input;
                 use differential_dataflow::operators::arrange::ArrangeByKey;
 
-                let (input, trace) = worker.dataflow(|scope| {
-                    let (input, collection) = scope.new_collection_from(updates.into_iter());
+                // let (input, trace) =
+                worker.dataflow(|scope| {
+
+                    let (input, collection) = scope.new_collection();
+
+                    for keys in keys.into_iter() {
+                        let keys_clone = keys.clone();
+                        let vals = (0 .. arity).filter(|i| !keys.contains(i)).collect::<Vec<_>>();
+                        let trace =
+                        collection
+                            .map(move |tuple: Vec<V>|
+                                (
+                                    keys.iter().map(|index| tuple[*index].clone()).collect::<Vec<_>>(),
+                                    vals.iter().map(|index| tuple[*index].clone()).collect::<Vec<_>>(),
+                                )
+                            )
+                            .arrange_by_key()
+                            .trace;
+
+                        manager.traces.set(&Plan::source(&name, arity), Some(&keys_clone[..]), &trace);
+                    }
+
                     let trace = collection.map(|x| (x,vec![])).arrange_by_key().trace;
-                    (input, trace)
+                    manager.insert_input(name, arity, input, trace);
+
                 });
 
-                manager.insert_input(name, arity, input, trace);
-
+                // manager.insert_input(name, arity, input, trace);
             },
 
             Command::UpdateInput(name, updates) => {
@@ -193,13 +246,12 @@ where
                     },
                     _ => { println!("{}", format!("Unknown logging flavor: {}", flavor)); }
                 }
-
-            }
+            },
 
             Command::Shutdown => {
                 println!("Shutdown received");
                 manager.shutdown(worker);
-            }
+            },
         }
     }
 

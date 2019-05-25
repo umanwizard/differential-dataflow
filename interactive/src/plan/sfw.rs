@@ -73,7 +73,7 @@ impl<V: ExchangeData+Hash+Datum> Render for MultiwayJoin<V> {
         stash: &mut Stash<S, Self::Value>,
     ) -> Collection<S, Vec<Self::Value>, Diff>
     where
-        S::Timestamp: differential_dataflow::lattice::Lattice,
+        S::Timestamp: differential_dataflow::lattice::Lattice+timely::progress::timestamp::Refines<crate::Time>,
     {
         // The idea here is the following:
         //
