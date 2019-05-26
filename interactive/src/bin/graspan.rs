@@ -30,8 +30,8 @@ fn main() {
         let line = readline.ok().expect("read error");
         if !line.starts_with('#') && line.len() > 0 {
             let mut elts = line[..].split_whitespace();
-            let src: usize = elts.next().unwrap().parse().ok().expect("malformed src");
-            let dst: usize = elts.next().unwrap().parse().ok().expect("malformed dst");
+            let src: u32 = elts.next().unwrap().parse().ok().expect("malformed src");
+            let dst: u32 = elts.next().unwrap().parse().ok().expect("malformed dst");
             let typ: &str = elts.next().unwrap();
 
             let update = (vec![src.into(), dst.into()], Duration::from_secs(0), 1);

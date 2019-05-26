@@ -1,7 +1,11 @@
 //! An example value type.
 
 use std::time::Duration;
+use differential_dataflow::ExchangeData;
+
 use super::{Datum, VectorFrom, Command};
+
+type SessionValue = Value;
 
 /// A session.
 pub struct Session<W: std::io::Write> {
@@ -12,8 +16,8 @@ impl<W: std::io::Write> Session<W> {
     /// Create a new session.
     pub fn new(write: W) -> Self { Self { write } }
     /// Issue a command.
-    pub fn issue<C: Into<Command<Value>>>(&mut self, command: C) {
-        let command: Command<Value> = command.into();
+    pub fn issue<C: Into<Command<SessionValue>>>(&mut self, command: C) {
+        let command: Command<SessionValue> = command.into();
         bincode::serialize_into(&mut self.write, &command)
             .expect("bincode: serialization failed");
     }
@@ -40,6 +44,7 @@ impl Datum for Value {
     fn projection(index: usize) -> Self::Expression { index }
 }
 
+impl From<u32> for Value { fn from(x: u32) -> Self { Value::Usize(x as usize) } }
 impl From<usize> for Value { fn from(x: usize) -> Self { Value::Usize(x) } }
 impl From<bool> for Value { fn from(x: bool) -> Self { Value::Bool(x) } }
 impl From<String> for Value { fn from(x: String) -> Self { Value::String(x) } }

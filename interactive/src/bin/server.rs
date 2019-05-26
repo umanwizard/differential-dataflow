@@ -10,6 +10,9 @@ use timely::synchronization::Sequencer;
 use interactive::{Command, Manager};
 use interactive::concrete::Value;
 
+// type Value = u32;
+// type Value = usize;
+
 fn main() {
 
     let mut args = std::env::args();

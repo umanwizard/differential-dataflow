@@ -46,6 +46,18 @@ pub trait Datum : Hash+Sized+Debug {
     fn projection(index: usize) -> Self::Expression;
 }
 
+impl Datum for usize {
+    type Expression = usize;
+    fn subject_to(data: &[Self], expr: &usize) -> Self { data[*expr] }
+    fn projection(index: usize) -> usize { index }
+}
+
+impl Datum for u32 {
+    type Expression = usize;
+    fn subject_to(data: &[Self], expr: &usize) -> Self { data[*expr] }
+    fn projection(index: usize) -> usize { index }
+}
+
 /// A type that can be converted to a vector of another type.
 pub trait VectorFrom<T> : Sized {
     /// Converts `T` to a vector of `Self`.

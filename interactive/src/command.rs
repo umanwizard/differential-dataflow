@@ -43,7 +43,7 @@ impl<V: Datum> From<Rule<V>> for Command<V> {
 
 impl<V: Datum> Command<V>
 where
-    V: ExchangeData+Hash+LoggingValue+From<usize>,
+    V: ExchangeData+Hash,//+LoggingValue+From<usize>,
 {
     /// Executes a command.
     pub fn execute<A: Allocate>(self, manager: &mut Manager<V>, worker: &mut Worker<A>) {
@@ -199,56 +199,58 @@ where
 
             Command::SourceLogging(address, flavor, number, granularity, name_as) => {
 
-                match flavor.as_str() {
-                    "timely" => {
+                unimplemented!()
 
-                        let mut streams = Vec::new();
+                // match flavor.as_str() {
+                //     "timely" => {
 
-                        // Only one worker can bind to listen.
-                        if worker.index() == 0 {
+                //         let mut streams = Vec::new();
 
-                            use std::time::Duration;
-                            use std::net::TcpListener;
-                            use timely::dataflow::operators::capture::EventReader;
+                //         // Only one worker can bind to listen.
+                //         if worker.index() == 0 {
 
-                            println!("Awaiting timely logging connections ({})", number);
+                //             use std::time::Duration;
+                //             use std::net::TcpListener;
+                //             use timely::dataflow::operators::capture::EventReader;
 
-                            // e.g. "127.0.0.1:8000"
-                            let listener = TcpListener::bind(address).unwrap();
-                            for index in 0 .. number {
-                                println!("\tTimely logging connection {} of {}", index, number);
-                                let socket = listener.incoming().next().unwrap().unwrap();
-                                socket.set_nonblocking(true).expect("failed to set nonblocking");
-                                streams.push(EventReader::<Duration, (Duration, usize, TimelyEvent),_>::new(socket));
-                            }
+                //             println!("Awaiting timely logging connections ({})", number);
 
-                            println!("\tAll logging connections established");
-                        }
-                        crate::logging::publish_timely_logging(manager, worker, granularity, &name_as, streams);
-                    },
-                    "differential" => {
+                //             // e.g. "127.0.0.1:8000"
+                //             let listener = TcpListener::bind(address).unwrap();
+                //             for index in 0 .. number {
+                //                 println!("\tTimely logging connection {} of {}", index, number);
+                //                 let socket = listener.incoming().next().unwrap().unwrap();
+                //                 socket.set_nonblocking(true).expect("failed to set nonblocking");
+                //                 streams.push(EventReader::<Duration, (Duration, usize, TimelyEvent),_>::new(socket));
+                //             }
 
-                        let mut streams = Vec::new();
+                //             println!("\tAll logging connections established");
+                //         }
+                //         crate::logging::publish_timely_logging(manager, worker, granularity, &name_as, streams);
+                //     },
+                //     "differential" => {
 
-                        // Only one worker can bind to listen.
-                        if worker.index() == 0 {
+                //         let mut streams = Vec::new();
 
-                            use std::time::Duration;
-                            use std::net::TcpListener;
-                            use timely::dataflow::operators::capture::EventReader;
+                //         // Only one worker can bind to listen.
+                //         if worker.index() == 0 {
 
-                            // "127.0.0.1:8000"
-                            let listener = TcpListener::bind(address).unwrap();
-                            for _ in 0 .. number {
-                                let socket = listener.incoming().next().unwrap().unwrap();
-                                socket.set_nonblocking(true).expect("failed to set nonblocking");
-                                streams.push(EventReader::<Duration, (Duration, usize, DifferentialEvent),_>::new(socket));
-                            }
-                        }
-                        crate::logging::publish_differential_logging(manager, worker, granularity, &name_as, streams);
-                    },
-                    _ => { println!("{}", format!("Unknown logging flavor: {}", flavor)); }
-                }
+                //             use std::time::Duration;
+                //             use std::net::TcpListener;
+                //             use timely::dataflow::operators::capture::EventReader;
+
+                //             // "127.0.0.1:8000"
+                //             let listener = TcpListener::bind(address).unwrap();
+                //             for _ in 0 .. number {
+                //                 let socket = listener.incoming().next().unwrap().unwrap();
+                //                 socket.set_nonblocking(true).expect("failed to set nonblocking");
+                //                 streams.push(EventReader::<Duration, (Duration, usize, DifferentialEvent),_>::new(socket));
+                //             }
+                //         }
+                //         crate::logging::publish_differential_logging(manager, worker, granularity, &name_as, streams);
+                //     },
+                //     _ => { println!("{}", format!("Unknown logging flavor: {}", flavor)); }
+                // }
             },
 
             Command::Shutdown => {
