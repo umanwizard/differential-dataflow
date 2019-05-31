@@ -218,9 +218,10 @@ impl<V: ExchangeData+Hash+Datum> Render for MultiwayJoin<V> {
                     .expect("Surely we just ensured this")
                     .clone();
 
-                let key_selector = std::rc::Rc::new(move |change: &Vec<V>|
-                    priors.iter().map(|&p| change[p].clone()).collect::<Vec<_>>()
-                );
+                let key_selector = move |change: &Vec<V>, key: &mut Vec<V>| {
+                    key.clear();
+                    key.extend(priors.iter().map(|&p| change[p].clone()));
+                };
 
                 join_plan.push((join_idx, key_selector, arrangement));
 
@@ -249,14 +250,33 @@ impl<V: ExchangeData+Hash+Datum> Render for MultiwayJoin<V> {
                     // tuple in the cursor.
                     changes =
                     if join_idx < index {
+// <<<<<<< Updated upstream
+//                         let arrangement = trace.enter_at(inner, |_,_,t| AltNeu::alt(t.clone()));
+//                         dogsdogsdogs::operators::propose(&changes, arrangement, key_selector)
+//                     }
+//                     else {
+//                         let arrangement = trace.enter_at(inner, |_,_,t| AltNeu::neu(t.clone()));
+//                         dogsdogsdogs::operators::propose(&changes, arrangement, key_selector)
+// =======
                         let arrangement = trace.enter_at(inner, |_,_,t| AltNeu::alt(t.clone()));
-                        dogsdogsdogs::operators::propose(&changes, arrangement, key_selector)
+                        dogsdogsdogs::operators::lookup_map(
+                            &changes,
+                            arrangement,
+                            key_selector,
+                            |p,r1,e,r2| (p.iter().chain(e).cloned().collect(), r1 * r2),
+                        )
                     }
                     else {
                         let arrangement = trace.enter_at(inner, |_,_,t| AltNeu::neu(t.clone()));
-                        dogsdogsdogs::operators::propose(&changes, arrangement, key_selector)
+                        dogsdogsdogs::operators::lookup_map(
+                            &changes,
+                            arrangement,
+                            key_selector,
+                            |p,r1,e,r2| (p.iter().chain(e).cloned().collect(), r1 * r2),
+                        )
+// >>>>>>> Stashed changes
                     }
-                    .map(|(mut prefix, extensions)| { prefix.extend(extensions.into_iter()); prefix })
+                    // .map(|(mut prefix, extensions)| { prefix.extend(extensions.into_iter()); prefix })
                     ;
 
                     // TODO: Equality constraints strictly within a relation have the effect
