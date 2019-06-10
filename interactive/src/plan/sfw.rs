@@ -237,10 +237,7 @@ impl<V: ExchangeData+Hash+Datum> Render for MultiwayJoin<V> {
             let changes = scope.clone().scoped::<AltNeu<_>,_,_>(&scope_name, |inner| {
 
                 // This should default to an `AltNeu::Alt` timestamp.
-                let mut changes =
-                changes
-                    .enter(inner)
-                    ;
+                let mut changes = changes.enter(inner);
 
                 for (join_idx, key_selector, mut trace) in join_plan.into_iter() {
 
@@ -250,14 +247,6 @@ impl<V: ExchangeData+Hash+Datum> Render for MultiwayJoin<V> {
                     // tuple in the cursor.
                     changes =
                     if join_idx < index {
-// <<<<<<< Updated upstream
-//                         let arrangement = trace.enter_at(inner, |_,_,t| AltNeu::alt(t.clone()));
-//                         dogsdogsdogs::operators::propose(&changes, arrangement, key_selector)
-//                     }
-//                     else {
-//                         let arrangement = trace.enter_at(inner, |_,_,t| AltNeu::neu(t.clone()));
-//                         dogsdogsdogs::operators::propose(&changes, arrangement, key_selector)
-// =======
                         let arrangement = trace.enter_at(inner, |_,_,t| AltNeu::alt(t.clone()));
                         dogsdogsdogs::operators::lookup_map(
                             &changes,
@@ -274,10 +263,7 @@ impl<V: ExchangeData+Hash+Datum> Render for MultiwayJoin<V> {
                             key_selector,
                             |p,r1,e,r2| (p.iter().chain(e).cloned().collect(), r1 * r2),
                         )
-// >>>>>>> Stashed changes
-                    }
-                    // .map(|(mut prefix, extensions)| { prefix.extend(extensions.into_iter()); prefix })
-                    ;
+                    };
 
                     // TODO: Equality constraints strictly within a relation have the effect
                     //       of "filtering" data, but they are ignored at the moment. We should
