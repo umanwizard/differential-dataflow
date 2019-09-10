@@ -46,7 +46,7 @@ pub type OrdKeySpineAbom<K, T, R, O=usize> = Spine<K, (), T, R, Rc<Abomonated<Or
 
 
 /// An immutable collection of update tuples, from a contiguous interval of logical times.
-#[derive(Debug, Abomonation)]
+#[derive(Debug, Abomonation, Serialize)]
 pub struct OrdValBatch<K, V, T, R, O=usize>
 where
     K: Ord,
@@ -375,7 +375,7 @@ where
 
 
 /// An immutable collection of update tuples, from a contiguous interval of logical times.
-#[derive(Debug, Abomonation)]
+#[derive(Debug, Abomonation, Serialize)]
 pub struct OrdKeyBatch<K, T, R, O=usize>
 where
     K: Ord,

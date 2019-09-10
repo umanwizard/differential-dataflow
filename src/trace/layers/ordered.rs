@@ -19,7 +19,7 @@ where
 /// A level of the trie, with keys and offsets into a lower layer.
 ///
 /// In this representation, the values for `keys[i]` are found at `vals[offs[i] .. offs[i+1]]`.
-#[derive(Debug, Eq, PartialEq, Clone, Abomonation)]
+#[derive(Debug, Eq, PartialEq, Clone, Abomonation, Serialize)]
 pub struct OrderedLayer<K, L, O=usize>
 where
     K: Ord,
