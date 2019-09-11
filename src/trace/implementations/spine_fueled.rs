@@ -14,11 +14,32 @@ use trace::cursor::{Cursor, CursorList};
 use trace::Merger;
 
 use ::timely::dataflow::operators::generic::OperatorInfo;
+use malloc_size_of::{MallocUnconditionalSizeOf, MallocSizeOf, MallocSizeOfOps, MallocConditionalSizeOf};
+use std::collections::HashSet;
 
-enum MergeState<K, V, T, R, B: Batch<K, V, T, R>> {
+#[allow(missing_docs)]
+pub enum MergeState<K, V, T, R, B: Batch<K, V, T, R>> {
+    #[allow(missing_docs)]
     Merging(B, B, Option<Vec<T>>, <B as Batch<K,V,T,R>>::Merger),
+    #[allow(missing_docs)]
     Complete(B),
 }
+
+impl<K, V, T, R, B: Batch<K, V, T, R>> MallocConditionalSizeOf for MergeState<K, V, T, R, B>
+where
+    B: MallocConditionalSizeOf,
+    <B as Batch<K,V,T,R>>::Merger: MallocConditionalSizeOf,
+    T: MallocSizeOf,
+{
+    fn conditional_size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
+        match self {
+            MergeState::Merging(a, b, c, d) =>
+                a.conditional_size_of(ops) + b.conditional_size_of(ops) + c.size_of(ops) + d.conditional_size_of(ops),
+            MergeState::Complete(a) => a.conditional_size_of(ops),
+        }
+    }
+}
+
 
 impl<K, V, T: Eq, R, B: Batch<K, V, T, R>> MergeState<K, V, T, R, B> {
     fn complete(mut self, logger: &mut Option<::logging::Logger>, operator: usize, scale: usize) -> B {
@@ -106,6 +127,32 @@ pub struct Spine<K, V, T: Lattice+Ord, R: Semigroup, B: Batch<K, V, T, R>> {
     upper: Vec<T>,
     effort: usize,
 }
+
+impl<K, V, T, R, B> MallocSizeOf for Spine<K, V, T, R, B>
+where
+    K: Ord,
+    V: Ord,
+    T: Lattice+Ord+MallocSizeOf,
+    R: Semigroup,
+    B: Batch<K, V, T, R>+MallocConditionalSizeOf,
+    MergeState<K,V,T,R,B>: MallocConditionalSizeOf,
+{
+    fn size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
+        let mut seen = HashSet::new();
+        let old = std::mem::replace(&mut ops.have_seen_ptr_op, Some(Box::new(
+            move |ptr| !seen.insert(ptr)
+        )));
+        let ret = self.operator.address.size_of(ops)
+            + self.advance_frontier.size_of(ops)
+            + self.through_frontier.size_of(ops)
+            + self.merging.conditional_size_of(ops)
+            + self.pending.conditional_size_of(ops)
+            + self.upper.size_of(ops);
+        ops.have_seen_ptr_op = old;
+        ret
+    }
+}
+
 
 impl<K, V, T, R, B> TraceReader for Spine<K, V, T, R, B>
 where

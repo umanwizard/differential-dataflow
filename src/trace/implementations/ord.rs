@@ -193,6 +193,7 @@ where
 }
 
 /// State for an in-progress merge.
+#[derive(MallocSizeOf)]
 pub struct OrdValMerger<K, V, T, R, O=usize>
 where
     K: Ord+Clone+'static,
@@ -375,7 +376,7 @@ where
 
 
 /// An immutable collection of update tuples, from a contiguous interval of logical times.
-#[derive(Debug, Abomonation, Serialize)]
+#[derive(Debug, Abomonation, Serialize, MallocSizeOf)]
 pub struct OrdKeyBatch<K, T, R, O=usize>
 where
     K: Ord,
@@ -495,6 +496,7 @@ where
 }
 
 /// State for an in-progress merge.
+#[derive(MallocSizeOf)]
 pub struct OrdKeyMerger<K, T, R, O=usize>
 where
     K: Ord+Clone+'static,

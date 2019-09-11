@@ -70,8 +70,6 @@
 //! of some node degree by one (typically four output changes, corresponding to the addition and deletion
 //! of the new and old counts of the old and new degrees of the affected node).
 
-#![forbid(missing_docs)]
-
 use std::fmt::Debug;
 
 pub use collection::{Collection, AsCollection};
@@ -100,6 +98,10 @@ extern crate abomonation;
 #[macro_use]
 extern crate serde_derive;
 extern crate serde;
+extern crate jemallocator;
+#[macro_use]
+extern crate malloc_size_of_derive;
+extern crate malloc_size_of;
 
 pub mod hashable;
 pub mod operators;
@@ -111,3 +113,6 @@ pub mod difference;
 pub mod collection;
 pub mod logging;
 pub mod consolidation;
+
+#[global_allocator]
+static ALLOC: jemallocator::Jemalloc = jemallocator::Jemalloc;

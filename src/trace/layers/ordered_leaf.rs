@@ -5,7 +5,7 @@ use ::difference::Semigroup;
 use super::{Trie, Cursor, Builder, MergeBuilder, TupleBuilder, advance};
 
 /// A layer of unordered values.
-#[derive(Debug, Eq, PartialEq, Clone, Abomonation, Serialize)]
+#[derive(Debug, Eq, PartialEq, Clone, Abomonation, Serialize, MallocSizeOf)]
 pub struct OrderedLeaf<K, R> {
     /// Unordered values.
     pub vals: Vec<(K, R)>,
@@ -27,6 +27,7 @@ impl<K: Ord+Clone, R: Semigroup+Clone> Trie for OrderedLeaf<K, R> {
 }
 
 /// A builder for unordered values.
+#[derive(MallocSizeOf)]
 pub struct OrderedLeafBuilder<K, R> {
     /// Unordered values.
     pub vals: Vec<(K, R)>,

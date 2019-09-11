@@ -32,6 +32,10 @@ timely_sort="0.1.6"
 timely = { git = "https://github.com/TimelyDataflow/timely-dataflow" }
 #timely = { path = "../timely-dataflow/timely/" }
 fnv="1.0.2"
+malloc_size_of = { path = "./malloc_size_of" }
+malloc_size_of_derive = "0.1.0"
+jemallocator = "0.3.0"
+jemalloc-sys = { version = "0.3.0" }
 
 [profile.release]
 opt-level = 3

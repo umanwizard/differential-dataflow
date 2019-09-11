@@ -298,6 +298,7 @@ pub mod rc_blanket_impls {
 	use std::rc::Rc;
 
 	use super::{Batch, BatchReader, Batcher, Builder, Merger, Cursor, Description};
+	use malloc_size_of::{MallocConditionalSizeOf, MallocSizeOfOps, MallocSizeOf, MallocUnconditionalSizeOf};
 
 	impl<K, V, T, R, B: BatchReader<K,V,T,R>> BatchReader<K,V,T,R> for Rc<B> {
 
@@ -384,7 +385,15 @@ pub mod rc_blanket_impls {
 	}
 
 	/// Wrapper type for merging reference counted batches.
+
 	pub struct RcMerger<K,V,T,R,B:Batch<K,V,T,R>> { merger: B::Merger }
+	impl<K,V,T,R,B> MallocConditionalSizeOf for RcMerger<K,V,T,R,B>
+	where B:Batch<K,V,T,R>,
+		B::Merger: MallocSizeOf {
+		fn conditional_size_of(&self, ops: &mut MallocSizeOfOps) -> usize {
+			self.merger.size_of(ops)
+		}
+	}
 
 	/// Represents a merge in progress.
 	impl<K,V,T,R,B:Batch<K,V,T,R>> Merger<K, V, T, R, Rc<B>> for RcMerger<K,V,T,R,B> {

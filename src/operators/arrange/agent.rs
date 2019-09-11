@@ -21,6 +21,7 @@ use super::{TraceWriter, TraceAgentQueueWriter, TraceAgentQueueReader, Arranged}
 use super::TraceReplayInstruction;
 
 use crate::trace::wrappers::frontier::{TraceFrontier, BatchFrontier};
+use malloc_size_of::{MallocSizeOf, MallocSizeOfOps};
 
 
 /// A `TraceReader` wrapper which can be imported into other dataflows.
@@ -74,6 +75,20 @@ where
         self.trace.borrow_mut().trace.cursor_through(frontier)
     }
     fn map_batches<F: FnMut(&Self::Batch)>(&mut self, f: F) { self.trace.borrow_mut().trace.map_batches(f) }
+}
+
+impl<Tr> TraceAgent<Tr>
+where
+    Tr: MallocSizeOf+TraceReader,
+    Tr::Time: Lattice+Ord+Clone+'static,
+{
+    pub fn trace_size(&self) -> usize {
+        self.trace.borrow().trace.size_of(&mut MallocSizeOfOps::new(
+            jemalloc_sys::malloc_usable_size,
+            None,
+            None,
+        ))
+    }
 }
 
 impl<Tr> TraceAgent<Tr>
