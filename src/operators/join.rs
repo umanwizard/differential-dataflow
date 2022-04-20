@@ -576,7 +576,7 @@ impl<G, T1> JoinCore<G, T1::Key, T1::Val, T1::R> for Arranged<G,T1>
                 // input must scan all batches from the other input).
 
                 // Perform some amount of outstanding work.
-                let mut fuel = 1_000_000;
+                let mut fuel = 1_000;
                 while !todo1.is_empty() && fuel > 0 {
                     todo1.front_mut().unwrap().work(
                         output,
@@ -587,7 +587,7 @@ impl<G, T1> JoinCore<G, T1::Key, T1::Val, T1::R> for Arranged<G,T1>
                 }
 
                 // Perform some amount of outstanding work.
-                let mut fuel = 1_000_000;
+                let mut fuel = 1_000;
                 while !todo2.is_empty() && fuel > 0 {
                     todo2.front_mut().unwrap().work(
                         output,
